@@ -30,6 +30,10 @@ jobs:
       APP_ENV: test
       APP_SECRET_KEY: test-only-secret-that-is-long-enough-for-jwt-signing
       DATABASE_URL: postgresql+asyncpg://smeops:smeops@localhost:5432/smeops
+      WHATSAPP_VERIFY_TOKEN: test-verify-token
+      WHATSAPP_APP_SECRET: test-whatsapp-app-secret
+      WHATSAPP_TOKEN_ENCRYPTION_KEY: c21lb3BzLWNpLXdoYXRzYXBwLWZlcm5ldC1rZXktMzI=
+      PLATFORM_ADMIN_KEY: test-platform-admin-key-long-enough
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
