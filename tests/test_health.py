@@ -10,6 +10,13 @@ def test_liveness_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_readiness_checks_database() -> None:
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "ok"}
+
+
 def test_root_identifies_service() -> None:
     with TestClient(app) as client:
         response = client.get("/")

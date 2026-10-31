@@ -12,6 +12,24 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: smeops
+          POSTGRES_USER: smeops
+          POSTGRES_PASSWORD: smeops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smeops -d smeops"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      APP_SECRET_KEY: test-only-secret-that-is-long-enough-for-jwt-signing
+      DATABASE_URL: postgresql+asyncpg://smeops:smeops@localhost:5432/smeops
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,6 +38,8 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
+      - name: Validate database migrations
+        run: alembic upgrade head
       - name: Lint
         run: ruff check .
       - name: Tests
