@@ -68,6 +68,7 @@ class BusinessHoursResponse(BaseModel):
 
 
 class AppointmentCreate(BaseModel):
+    idempotency_key: UUID
     service_id: UUID
     customer_name: str = Field(min_length=2, max_length=160)
     customer_phone: str = Field(pattern=r"^\+[1-9]\d{7,14}$")

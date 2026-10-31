@@ -88,6 +88,11 @@ class BusinessHours(UUIDPrimaryKey, TimestampMixin, Base):
 class Appointment(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "appointments"
     __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "idempotency_key",
+            name="uq_appointments_tenant_idempotency",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "service_id"],
             ["services.tenant_id", "services.id"],
@@ -111,12 +116,18 @@ class Appointment(UUIDPrimaryKey, TimestampMixin, Base):
             "status IN ('confirmed', 'cancelled')",
             name="appointment_status_valid",
         ),
+        CheckConstraint(
+            "length(request_fingerprint) = 64",
+            name="appointment_fingerprint_valid",
+        ),
         Index("ix_appointments_tenant_start", "tenant_id", "starts_at"),
     )
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     service_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     customer_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)

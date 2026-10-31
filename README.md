@@ -44,7 +44,7 @@ Endpoints:
 - `POST /orders/{id}/cancel`: cancel an order awaiting approval.
 - `POST /orders/{id}/fulfill`: mark an approved order fulfilled.
 
-Prices are represented as integer minor currency units (kobo) and currency is currently fixed to NGN. Business hours currently support one opening interval per weekday. Appointment timestamps must include a timezone offset and are stored in UTC. Retail orders are drafts pending owner/manager approval; stock is deducted only at approval. Payment, delivery and post-approval refunds are outside this increment.
+Prices are represented as integer minor currency units (kobo) and currency is currently fixed to NGN. Business hours currently support one opening interval per weekday. Appointment creation requires a client-generated idempotency UUID; replays with the same request return the original booking, while key reuse with a different payload is rejected. Appointment timestamps must include a timezone offset and are stored in UTC. Retail orders are drafts pending owner/manager approval; stock is deducted only at approval. Payment, delivery and post-approval refunds are outside this increment.
 
 ## Security status and limitations
 

@@ -70,6 +70,7 @@ def test_tenant_scoped_service_and_appointment_workflow() -> None:
             hour=10, minute=0, second=0, microsecond=0
         )
         booking_payload = {
+            "idempotency_key": str(uuid4()),
             "service_id": service_id,
             "customer_name": "Ada Customer",
             "customer_phone": "+2348012345678",
@@ -79,7 +80,19 @@ def test_tenant_scoped_service_and_appointment_workflow() -> None:
         assert booking.status_code == 201
         appointment_id = booking.json()["id"]
 
+        replay = client.post("/appointments", headers=auth_a, json=booking_payload)
+        assert replay.status_code == 201
+        assert replay.json()["id"] == appointment_id
+
+        changed_request = dict(booking_payload)
+        changed_request["starts_at"] = (starts_at + timedelta(hours=2)).isoformat()
+        idempotency_conflict = client.post(
+            "/appointments", headers=auth_a, json=changed_request
+        )
+        assert idempotency_conflict.status_code == 409
+
         overlap_payload = dict(booking_payload)
+        overlap_payload["idempotency_key"] = str(uuid4())
         overlap_payload["starts_at"] = (starts_at + timedelta(minutes=30)).isoformat()
         overlap = client.post("/appointments", headers=auth_a, json=overlap_payload)
         assert overlap.status_code == 409
@@ -96,5 +109,9 @@ def test_tenant_scoped_service_and_appointment_workflow() -> None:
         assert cancellation.status_code == 200
         assert cancellation.json()["status"] == "cancelled"
 
-        replacement = client.post("/appointments", headers=auth_a, json=booking_payload)
+        replacement_payload = dict(booking_payload)
+        replacement_payload["idempotency_key"] = str(uuid4())
+        replacement = client.post(
+            "/appointments", headers=auth_a, json=replacement_payload
+        )
         assert replacement.status_code == 201

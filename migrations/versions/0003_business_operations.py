@@ -129,6 +129,8 @@ def upgrade() -> None:
         "appointments",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("idempotency_key", sa.Uuid(), nullable=False),
+        sa.Column("request_fingerprint", sa.String(length=64), nullable=False),
         sa.Column("service_id", sa.Uuid(), nullable=False),
         sa.Column("customer_id", sa.Uuid(), nullable=False),
         sa.Column("created_by_user_id", sa.Uuid(), nullable=False),
@@ -155,6 +157,10 @@ def upgrade() -> None:
             "status IN ('confirmed', 'cancelled')",
             name="ck_appointments_appointment_status_valid",
         ),
+        sa.CheckConstraint(
+            "length(request_fingerprint) = 64",
+            name="ck_appointments_appointment_fingerprint_valid",
+        ),
         sa.ForeignKeyConstraint(
             ["tenant_id"],
             ["tenants.id"],
@@ -180,6 +186,11 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_appointments"),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "idempotency_key",
+            name="uq_appointments_tenant_idempotency",
+        ),
     )
     op.create_index(
         "ix_appointments_tenant_start",

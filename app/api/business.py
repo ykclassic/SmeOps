@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -183,6 +185,39 @@ async def create_appointment(
     user: CurrentUser,
 ) -> AppointmentResponse:
     tenant = await _lock_tenant(session, user.tenant_id)
+    starts_at = payload.starts_at.astimezone(UTC)
+    fingerprint_payload = {
+        "service_id": str(payload.service_id),
+        "customer_name": payload.customer_name,
+        "customer_phone": payload.customer_phone,
+        "starts_at": starts_at.isoformat(),
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    existing_result = await session.execute(
+        select(Appointment).where(
+            Appointment.tenant_id == tenant.id,
+            Appointment.idempotency_key == payload.idempotency_key,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint:
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key was already used for a different appointment",
+            )
+        customer_result = await session.execute(
+            select(Customer).where(
+                Customer.id == existing.customer_id,
+                Customer.tenant_id == tenant.id,
+            )
+        )
+        customer = customer_result.scalar_one()
+        return _appointment_response(existing, customer)
+
     service_result = await session.execute(
         select(Service).where(
             Service.id == payload.service_id,
@@ -194,7 +229,6 @@ async def create_appointment(
     if service is None:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    starts_at = payload.starts_at.astimezone(UTC)
     if starts_at <= datetime.now(UTC):
         raise HTTPException(status_code=422, detail="Appointment must be in the future")
     ends_at = starts_at + timedelta(minutes=service.duration_minutes)
@@ -256,6 +290,8 @@ async def create_appointment(
     appointment = Appointment(
         id=uuid4(),
         tenant_id=tenant.id,
+        idempotency_key=payload.idempotency_key,
+        request_fingerprint=fingerprint,
         service_id=service.id,
         customer_id=customer.id,
         created_by_user_id=user.id,
