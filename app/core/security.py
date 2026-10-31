@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -21,7 +21,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_access_token(*, user_id: UUID, tenant_id: UUID) -> str:
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "tenant_id": str(tenant_id),

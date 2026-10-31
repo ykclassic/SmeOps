@@ -1,5 +1,4 @@
 from typing import Annotated
-from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -7,9 +6,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import decode_access_token
 from app.db.session import get_db_session
 from app.models import Tenant, User
-from app.core.security import decode_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]

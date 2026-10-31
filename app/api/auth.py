@@ -48,7 +48,8 @@ async def register(payload: RegisterRequest, session: DbSession) -> TokenRespons
             detail="Business identifier or account already exists",
         ) from exc
 
-    return TokenResponse(access_token=create_access_token(user_id=user.id, tenant_id=tenant.id))
+    token = create_access_token(user_id=user.id, tenant_id=tenant.id)
+    return TokenResponse(access_token=token)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -71,7 +72,8 @@ async def login(payload: LoginRequest, session: DbSession) -> TokenResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return TokenResponse(access_token=create_access_token(user_id=user.id, tenant_id=user.tenant_id))
+    token = create_access_token(user_id=user.id, tenant_id=user.tenant_id)
+    return TokenResponse(access_token=token)
 
 
 @router.get("/me", response_model=CurrentUserResponse)
