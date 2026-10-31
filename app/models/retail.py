@@ -103,7 +103,12 @@ class OrderItem(UUIDPrimaryKey, Base):
             name="fk_order_items_tenant_product",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("tenant_id", "order_id", "product_id", name="uq_order_items_order_product"),
+        UniqueConstraint(
+            "tenant_id",
+            "order_id",
+            "product_id",
+            name="uq_order_items_order_product",
+        ),
         CheckConstraint("quantity > 0", name="order_item_quantity_positive"),
         CheckConstraint("unit_price_minor >= 0", name="order_item_price_nonnegative"),
         CheckConstraint("line_total_minor >= 0", name="order_item_total_nonnegative"),

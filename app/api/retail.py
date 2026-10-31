@@ -170,7 +170,11 @@ async def list_products(
 
 
 @router.post("/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order(payload: OrderCreate, session: DbSession, user: CurrentUser) -> OrderResponse:
+async def create_order(
+    payload: OrderCreate,
+    session: DbSession,
+    user: CurrentUser,
+) -> OrderResponse:
     tenant = await _lock_tenant(session, user.tenant_id)
     fingerprint = _fingerprint(payload)
 

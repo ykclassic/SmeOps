@@ -1,6 +1,11 @@
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 MAX_PRICE_MINOR = 1_000_000_000_000
