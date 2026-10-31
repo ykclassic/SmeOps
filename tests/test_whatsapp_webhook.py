@@ -152,6 +152,7 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
                 return connection, event, job
 
         connection, event, job = asyncio.run(inspect_persisted_records())
+        persisted_job_id = job.id
         assert connection.access_token_encrypted != access_token
         assert decrypt_whatsapp_secret(connection.access_token_encrypted) == access_token
         assert "Hello SmeOps" not in event.payload_encrypted
@@ -175,7 +176,7 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
                 )
                 event = event_result.scalar_one()
                 job_result = await session.execute(
-                    select(BackgroundJob).where(BackgroundJob.id == job.id)
+                    select(BackgroundJob).where(BackgroundJob.id == persisted_job_id)
                 )
                 job = job_result.scalar_one()
                 return event.status, job.status
