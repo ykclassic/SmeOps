@@ -8,14 +8,11 @@ from pydantic import (
 )
 
 
-MAX_PRICE_MINOR = 1_000_000_000_000
-
-
 class ProductCreate(BaseModel):
     sku: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
     name: str = Field(min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=1000)
-    price_minor: int = Field(ge=0, le=MAX_PRICE_MINOR)
+    price_minor: int = Field(ge=0, le=1_000_000_000_000)
     stock_quantity: int = Field(ge=0, le=1_000_000_000)
 
     @field_validator("sku")
