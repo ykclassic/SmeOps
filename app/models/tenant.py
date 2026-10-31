@@ -1,6 +1,6 @@
 from typing import Literal
 
-from sqlalchemy import CheckConstraint, String
+from sqlalchemy import CheckConstraint, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
@@ -16,10 +16,10 @@ class Tenant(UUIDPrimaryKey, TimestampMixin, Base):
     )
 
     name: Mapped[str] = mapped_column(String(160), nullable=False)
-    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     business_timezone: Mapped[str] = mapped_column(
-        String(64), nullable=False, default="Africa/Lagos"
+        String(64), nullable=False, default="Africa/Lagos", server_default="Africa/Lagos"
     )
     status: Mapped[Literal["active", "suspended", "pending"]] = mapped_column(
-        String(16), nullable=False, default="pending"
+        String(16), nullable=False, default="pending", server_default=text("'pending'")
     )

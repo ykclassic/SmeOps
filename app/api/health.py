@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +17,7 @@ async def liveness() -> dict[str, str]:
 
 @router.get("/ready", status_code=status.HTTP_200_OK)
 async def readiness(
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, str]:
     """Return ready only when the configured database can answer a trivial query."""
     try:
