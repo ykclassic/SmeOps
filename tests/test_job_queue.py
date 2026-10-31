@@ -1,0 +1,141 @@
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import select, update
+
+from app.jobs.queue import (
+    JobIdempotencyConflict,
+    claim_next_job,
+    complete_job,
+    enqueue_job,
+    fail_job,
+)
+from app.models import BackgroundJob, Tenant
+from app.db.session import AsyncSessionFactory
+
+
+async def _new_tenant() -> Tenant:
+    tenant = Tenant(
+        id=uuid4(),
+        name="Queue Test Business",
+        slug=f"queue-{uuid4().hex[:12]}",
+        business_timezone="Africa/Lagos",
+        status="active",
+    )
+    async with AsyncSessionFactory() as session:
+        session.add(tenant)
+        await session.commit()
+    return tenant
+
+
+@pytest.mark.asyncio
+async def test_job_enqueue_is_idempotent_and_worker_can_complete() -> None:
+    tenant = await _new_tenant()
+    key = f"unit-test:{uuid4()}"
+
+    async with AsyncSessionFactory() as session:
+        first = await enqueue_job(
+            session,
+            tenant_id=tenant.id,
+            job_type="test.noop",
+            payload={"record_id": "sample-123"},
+            idempotency_key=key,
+        )
+        await session.commit()
+        first_id = first.id
+
+    async with AsyncSessionFactory() as session:
+        replay = await enqueue_job(
+            session,
+            tenant_id=tenant.id,
+            job_type="test.noop",
+            payload={"record_id": "sample-123"},
+            idempotency_key=key,
+        )
+        assert replay.id == first_id
+        with pytest.raises(JobIdempotencyConflict):
+            await enqueue_job(
+                session,
+                tenant_id=tenant.id,
+                job_type="test.noop",
+                payload={"record_id": "different"},
+                idempotency_key=key,
+            )
+
+    async with AsyncSessionFactory() as session:
+        claimed = await claim_next_job(session, worker_id="test-worker")
+    assert claimed is not None
+    assert claimed.id == first_id
+    assert claimed.attempts == 1
+
+    async with AsyncSessionFactory() as session:
+        await complete_job(session, job_id=first_id, worker_id="test-worker")
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(BackgroundJob).where(BackgroundJob.id == first_id)
+        )
+        completed = result.scalar_one()
+        assert completed.status == "completed"
+        assert completed.locked_at is None
+        assert completed.locked_by is None
+
+
+@pytest.mark.asyncio
+async def test_job_retries_then_moves_to_dead_letter() -> None:
+    tenant = await _new_tenant()
+    async with AsyncSessionFactory() as session:
+        job = await enqueue_job(
+            session,
+            tenant_id=tenant.id,
+            job_type="test.failing",
+            payload={"safe": True},
+            idempotency_key=f"unit-test:{uuid4()}",
+            max_attempts=2,
+        )
+        await session.commit()
+        job_id = job.id
+
+    async with AsyncSessionFactory() as session:
+        first_claim = await claim_next_job(session, worker_id="retry-worker")
+    assert first_claim is not None
+    assert first_claim.attempts == 1
+
+    async with AsyncSessionFactory() as session:
+        await fail_job(
+            session,
+            job_id=job_id,
+            worker_id="retry-worker",
+            error_code="temporary_failure",
+        )
+
+    async with AsyncSessionFactory() as session:
+        await session.execute(
+            update(BackgroundJob)
+            .where(BackgroundJob.id == job_id)
+            .values(run_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        second_claim = await claim_next_job(session, worker_id="retry-worker")
+    assert second_claim is not None
+    assert second_claim.attempts == 2
+
+    async with AsyncSessionFactory() as session:
+        await fail_job(
+            session,
+            job_id=job_id,
+            worker_id="retry-worker",
+            error_code="temporary_failure",
+        )
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(BackgroundJob).where(BackgroundJob.id == job_id)
+        )
+        dead_letter = result.scalar_one()
+        assert dead_letter.status == "dead_letter"
+        assert dead_letter.last_error_code == "temporary_failure"
+        assert dead_letter.attempts == 2

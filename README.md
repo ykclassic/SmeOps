@@ -15,7 +15,7 @@ The repository is being established incrementally. The current foundation includ
 - SQLAlchemy 2.x and Alembic for persistence and schema migrations.
 - Deterministic backend services own bookings, orders, authorization and state transitions.
 - WhatsApp Cloud API integration will be isolated behind an adapter.
-- Background work will be persisted and processed by workers; webhook handlers must acknowledge quickly.
+- Background work is persisted in PostgreSQL and claimed with `FOR UPDATE SKIP LOCKED`; webhook handlers must acknowledge quickly.
 - Tenant identity is derived from signed server-side authentication context, never trusted from client-supplied tenant IDs.
 - The LLM will not receive direct database access. It may only request explicitly authorized application tools in a later phase.
 
@@ -53,9 +53,11 @@ Prices are represented as integer minor currency units (kobo) and currency is cu
 - Authenticated requests reload the user and tenant from PostgreSQL and reject disabled accounts or suspended tenants.
 - Tenant-scoped composite foreign keys prevent appointments from referencing another tenant's services, customers or users.
 - Appointment writes lock the tenant row before checking overlaps, serializing booking attempts for one business while allowing different businesses to book concurrently.
-- Service, business-hours and appointment changes write audit events in the same database transaction.
+- Service, business-hours, appointment, product and order changes write audit events in the same database transaction.
+- The generic job queue supports idempotent enqueueing, bounded retries, expiring worker leases, and dead-letter state. Job handlers must be idempotent because a worker can lose its lease after an external side effect.
 - Registration and login rate limiting, email verification, password reset, refresh-token rotation, CSRF protections for cookie-based sessions, and full audit-log access/retention controls are not yet implemented.
 - Appointment rescheduling, customer self-service and resource/staff-specific scheduling are not yet implemented.
+- WhatsApp event ingestion and production job handlers are not yet connected to the queue.
 - Do not expose this API publicly as a production service until those controls and the remaining Phase 1 exit criteria are complete.
 - The local default secret is rejected when `APP_ENV=production`; production must inject a unique secret through a secret manager.
 
