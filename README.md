@@ -6,7 +6,7 @@ SmeOps is a multi-tenant WhatsApp-based AI customer assistant SaaS for appointme
 
 **Phase 1 — Core Platform and Business Operations: in progress.**
 
-This repository is being established from an empty baseline. The first implementation increment creates the backend foundation and automated quality gates. Production readiness is not claimed until the phase exit criteria are demonstrated.
+The repository is being established incrementally. The current foundation includes the API, PostgreSQL persistence, tenant registry, tenant-scoped owner accounts and bearer-token authentication. It is not production-ready yet.
 
 ## Architecture baseline
 
@@ -14,21 +14,36 @@ This repository is being established from an empty baseline. The first implement
 - PostgreSQL 16 for durable application state.
 - SQLAlchemy 2.x and Alembic for persistence and schema migrations.
 - Deterministic backend services own bookings, orders, authorization and state transitions.
-- WhatsApp Cloud API integration is isolated behind an adapter.
-- Background work is persisted and processed by workers; webhook handlers acknowledge quickly.
-- Tenant identity is derived from authenticated server-side context, never trusted from client-supplied tenant IDs.
+- WhatsApp Cloud API integration will be isolated behind an adapter.
+- Background work will be persisted and processed by workers; webhook handlers must acknowledge quickly.
+- Tenant identity is derived from signed server-side authentication context, never trusted from client-supplied tenant IDs.
 - The LLM will not receive direct database access. It may only request explicitly authorized application tools in a later phase.
 
 ## Local development
 
-1. Copy `.env.example` to `.env` and set a strong `APP_SECRET_KEY` and local database URL.
+1. Copy `.env.example` to `.env` and set a unique `APP_SECRET_KEY` (at least 32 characters).
 2. Start PostgreSQL: `docker compose up -d db`.
 3. Install: `python -m pip install -e '.[dev]'`.
 4. Run migrations: `alembic upgrade head`.
 5. Start API: `uvicorn app.main:app --reload`.
 6. Run tests: `pytest`.
 
-The API health endpoint is `GET /health/live`. Readiness checks are separate and will include dependency checks before deployment.
+Endpoints:
+- `GET /health/live`: process liveness only.
+- `GET /health/ready`: checks PostgreSQL connectivity.
+- `POST /auth/register`: creates a business tenant and its initial owner.
+- `POST /auth/login`: authenticates an owner using business slug, email and password.
+- `GET /auth/me`: returns the authenticated account and tenant identifiers.
+
+## Security status and limitations
+
+- Passwords are hashed using Argon2.
+- Access tokens are signed with HS256 and contain only user and tenant identifiers plus standard claims.
+- Authenticated requests reload the user and tenant from PostgreSQL and reject disabled accounts or suspended tenants.
+- Role checks are server-side; tenant-owned data access must use the authenticated user's tenant ID.
+- Registration and login rate limiting, email verification, password reset, refresh-token rotation, CSRF protections for cookie-based sessions, and full audit logging are not yet implemented.
+- Do not expose this API publicly as a production service until those controls and the remaining Phase 1 exit criteria are complete.
+- The local default secret is rejected when `APP_ENV=production`; production must inject a unique secret through a secret manager.
 
 ## Engineering rules
 
@@ -48,5 +63,3 @@ The API health endpoint is `GET /health/live`. Readiness checks are separate and
 - Audit events cover security-sensitive and business-critical state transitions.
 - Unit, integration and end-to-end tests pass against PostgreSQL.
 - Operational limits, backup/restore and deployment smoke tests are evidenced.
-
-See the product blueprint and phase roadmap in project documentation as they are added.
