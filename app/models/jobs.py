@@ -3,12 +3,12 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     UniqueConstraint,
     Uuid,
