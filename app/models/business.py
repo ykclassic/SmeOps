@@ -4,6 +4,7 @@ from typing import Literal
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -37,7 +38,7 @@ class Service(UUIDPrimaryKey, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
-    price_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="NGN", server_default="NGN"
     )

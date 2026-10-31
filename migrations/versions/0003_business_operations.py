@@ -22,7 +22,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("description", sa.String(length=1000), nullable=True),
         sa.Column("duration_minutes", sa.Integer(), nullable=False),
-        sa.Column("price_minor", sa.Integer(), nullable=False),
+        sa.Column("price_minor", sa.BigInteger(), nullable=False),
         sa.Column("currency", sa.String(length=3), server_default="NGN", nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default=sa.true(), nullable=False),
         sa.Column(

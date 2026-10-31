@@ -8,7 +8,7 @@ class ServiceCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     description: str | None = Field(default=None, max_length=1000)
     duration_minutes: int = Field(ge=5, le=480)
-    price_minor: int = Field(ge=0)
+    price_minor: int = Field(ge=0, le=1_000_000_000_000)
 
     @field_validator("name")
     @classmethod
