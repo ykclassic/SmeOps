@@ -58,8 +58,12 @@ class BackgroundJob(UUIDPrimaryKey, TimestampMixin, Base):
     status: Mapped[Literal["queued", "running", "completed", "dead_letter"]] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")
     )
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
     run_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

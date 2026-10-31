@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 
+from app.db.session import AsyncSessionFactory
 from app.jobs.queue import (
     JobIdempotencyConflict,
     claim_next_job,
@@ -12,7 +13,6 @@ from app.jobs.queue import (
     fail_job,
 )
 from app.models import BackgroundJob, Tenant
-from app.db.session import AsyncSessionFactory
 
 
 async def _new_tenant() -> Tenant:
