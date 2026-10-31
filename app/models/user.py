@@ -1,7 +1,14 @@
 import uuid
 from typing import Literal
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, UniqueConstraint, Uuid, text
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
@@ -10,6 +17,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
 class User(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id_id"),
         UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
         CheckConstraint(
             "role IN ('owner', 'manager', 'staff')",

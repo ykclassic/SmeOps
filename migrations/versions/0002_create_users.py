@@ -50,6 +50,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_users"),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id_id"),
         sa.UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
     )
     op.create_index("ix_users_tenant_id", "users", ["tenant_id"], unique=False)

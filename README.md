@@ -6,7 +6,7 @@ SmeOps is a multi-tenant WhatsApp-based AI customer assistant SaaS for appointme
 
 **Phase 1 — Core Platform and Business Operations: in progress.**
 
-The repository is being established incrementally. The current foundation includes the API, PostgreSQL persistence, tenant registry, tenant-scoped owner accounts and bearer-token authentication. It is not production-ready yet.
+The repository is being established incrementally. The current foundation includes the API, PostgreSQL persistence, tenant registry, owner authentication, service catalogue, business hours, appointment booking and audit events. It is not production-ready yet.
 
 ## Architecture baseline
 
@@ -34,14 +34,23 @@ Endpoints:
 - `POST /auth/register`: creates a business tenant and its initial owner.
 - `POST /auth/login`: authenticates an owner using business slug, email and password.
 - `GET /auth/me`: returns the authenticated account and tenant identifiers.
+- `POST /services`, `GET /services`: manage and list a tenant's service catalogue.
+- `PUT /business-hours`, `GET /business-hours`: replace and retrieve the tenant's weekly opening schedule.
+- `POST /appointments`, `GET /appointments`: create and list tenant appointments.
+- `POST /appointments/{id}/cancel`: cancel a confirmed appointment.
+
+Prices are represented as integer minor currency units (kobo) and service currency is currently fixed to NGN. Business hours currently support one opening interval per weekday. Appointment timestamps must include a timezone offset and are stored in UTC.
 
 ## Security status and limitations
 
 - Passwords are hashed using Argon2.
 - Access tokens are signed with HS256 and contain only user and tenant identifiers plus standard claims.
 - Authenticated requests reload the user and tenant from PostgreSQL and reject disabled accounts or suspended tenants.
-- Role checks are server-side; tenant-owned data access must use the authenticated user's tenant ID.
-- Registration and login rate limiting, email verification, password reset, refresh-token rotation, CSRF protections for cookie-based sessions, and full audit logging are not yet implemented.
+- Tenant-scoped composite foreign keys prevent appointments from referencing another tenant's services, customers or users.
+- Appointment writes lock the tenant row before checking overlaps, serializing booking attempts for one business while allowing different businesses to book concurrently.
+- Service, business-hours and appointment changes write audit events in the same database transaction.
+- Registration and login rate limiting, email verification, password reset, refresh-token rotation, CSRF protections for cookie-based sessions, and full audit-log access/retention controls are not yet implemented.
+- Appointment rescheduling, customer self-service and resource/staff-specific scheduling are not yet implemented.
 - Do not expose this API publicly as a production service until those controls and the remaining Phase 1 exit criteria are complete.
 - The local default secret is rejected when `APP_ENV=production`; production must inject a unique secret through a secret manager.
 
