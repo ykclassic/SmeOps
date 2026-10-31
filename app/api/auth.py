@@ -34,7 +34,7 @@ async def register(payload: RegisterRequest, session: DbSession) -> TokenRespons
         id=uuid4(),
         tenant_id=tenant.id,
         email=str(payload.email).strip().lower(),
-        password_hash=hash_password(payload.password),
+        password_hash=hash_password(payload.password.get_secret_value()),
         role="owner",
         status="active",
     )
@@ -65,7 +65,10 @@ async def login(payload: LoginRequest, session: DbSession) -> TokenResponse:
         )
     )
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or not verify_password(
+        payload.password.get_secret_value(),
+        user.password_hash,
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid business identifier, email or password",

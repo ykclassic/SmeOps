@@ -286,13 +286,13 @@ async def provision_whatsapp_connection(
             tenant_id=tenant.id,
             phone_number_id=payload.phone_number_id,
             business_account_id=payload.business_account_id,
-            access_token_encrypted=encrypt_whatsapp_secret(payload.access_token),
+            access_token_encrypted=encrypt_whatsapp_secret(payload.access_token.get_secret_value()),
             status="active",
         )
     else:
         connection.phone_number_id = payload.phone_number_id
         connection.business_account_id = payload.business_account_id
-        connection.access_token_encrypted = encrypt_whatsapp_secret(payload.access_token)
+        connection.access_token_encrypted = encrypt_whatsapp_secret(payload.access_token.get_secret_value())
         connection.status = "active"
 
     session.add(connection)

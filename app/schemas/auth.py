@@ -1,13 +1,19 @@
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     business_name: str = Field(min_length=2, max_length=160)
-    tenant_slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", min_length=3, max_length=80)
+    tenant_slug: str = Field(
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        min_length=3,
+        max_length=80,
+    )
     email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
+    password: SecretStr = Field(min_length=12, max_length=128)
     business_timezone: str = Field(default="Africa/Lagos", min_length=1, max_length=64)
 
     @field_validator("business_name")
@@ -29,9 +35,11 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     tenant_slug: str = Field(min_length=3, max_length=80)
     email: EmailStr
-    password: str = Field(min_length=1, max_length=128)
+    password: SecretStr = Field(min_length=1, max_length=128)
 
 
 class TokenResponse(BaseModel):
