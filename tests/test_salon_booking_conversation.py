@@ -99,16 +99,14 @@ def test_complete_salon_booking_conversation(monkeypatch):
             )
             assert provision.status_code == 200
 
-            async def find_job(job_type: str) -> ClaimedJob:
+            async def find_job(job_type: str, idempotency_key: str) -> ClaimedJob:
                 async with AsyncSessionFactory() as session:
                     result = await session.execute(
-                        select(BackgroundJob)
-                        .where(
+                        select(BackgroundJob).where(
                             BackgroundJob.tenant_id == tenant_id,
                             BackgroundJob.job_type == job_type,
+                            BackgroundJob.idempotency_key == idempotency_key,
                         )
-                        .order_by(BackgroundJob.created_at.desc())
-                        .limit(1)
                     )
                     job = result.scalar_one()
                     return ClaimedJob(
@@ -120,7 +118,7 @@ def test_complete_salon_booking_conversation(monkeypatch):
                         max_attempts=job.max_attempts,
                     )
 
-            def send_customer_message(text: str) -> None:
+            def send_customer_message(text: str) -> str:
                 provider_id = f"wamid.{uuid4().hex}"
                 payload = {
                     "object": "whatsapp_business_account",
@@ -150,16 +148,32 @@ def test_complete_salon_booking_conversation(monkeypatch):
                 )
                 assert response.status_code == 200
                 assert response.json()["queued_events"] == 1
+                return provider_id
 
-            async def process_latest_inbound():
-                inbound_job = await find_job("whatsapp.accept_inbound")
+            async def process_inbound(provider_id: str):
+                event_key = "message:" + provider_id
+                inbound_job = await find_job(
+                    "whatsapp.accept_inbound",
+                    f"wa:{hashlib.sha256(event_key.encode()).hexdigest()}",
+                )
                 await accept_inbound_whatsapp_job(inbound_job)
-                conversation_job = await find_job("whatsapp.process_conversation")
+                async with AsyncSessionFactory() as session:
+                    message_result = await session.execute(
+                        select(WhatsAppConversationMessage).where(
+                            WhatsAppConversationMessage.tenant_id == tenant_id,
+                            WhatsAppConversationMessage.provider_message_id == provider_id,
+                        )
+                    )
+                    inbound_message = message_result.scalar_one()
+                conversation_job = await find_job(
+                    "whatsapp.process_conversation",
+                    f"wa:conversation:{inbound_message.id}",
+                )
                 await process_whatsapp_conversation_job(conversation_job)
 
             for customer_text in ("BOOK", "1", "Ada Lovelace", "tomorrow", "1", "YES"):
-                send_customer_message(customer_text)
-                asyncio.run(process_latest_inbound())
+                provider_id = send_customer_message(customer_text)
+                asyncio.run(process_inbound(provider_id))
 
             async def inspect_results():
                 async with AsyncSessionFactory() as session:
