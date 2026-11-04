@@ -16,6 +16,7 @@ from app.models import (
     AuditEvent,
     WhatsAppConnection,
     WhatsAppConversation,
+    WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
 )
 
@@ -116,7 +117,7 @@ async def enqueue_whatsapp_text(
             )
         return existing
 
-    await assert_outbound_policy(
+    conversation = await assert_outbound_policy(
         session,
         tenant_id=tenant_id,
         recipient=normalized_recipient,
@@ -161,6 +162,17 @@ async def enqueue_whatsapp_text(
             ) from None
         return duplicate
 
+    session.add(
+        WhatsAppConversationMessage(
+            tenant_id=tenant_id,
+            conversation_id=conversation.id,
+            provider_message_id=f"outbound:{message.id}",
+            direction="outbound",
+            message_type="text",
+            body_encrypted=encrypt_whatsapp_secret(normalized_body),
+            delivery_status="queued",
+        )
+    )
     session.add(
         AuditEvent(
             tenant_id=tenant_id,

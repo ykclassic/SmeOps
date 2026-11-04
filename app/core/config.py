@@ -24,12 +24,15 @@ class Settings(BaseSettings):
     whatsapp_token_encryption_key: SecretStr | None = None
     platform_admin_key: SecretStr | None = None
     whatsapp_graph_api_version: str | None = None
+    openai_api_key: SecretStr | None = None
+    openai_model: str | None = None
 
     @field_validator(
         "whatsapp_verify_token",
         "whatsapp_app_secret",
         "whatsapp_token_encryption_key",
         "platform_admin_key",
+        "openai_api_key",
         mode="before",
     )
     @classmethod
@@ -65,10 +68,21 @@ class Settings(BaseSettings):
             raise ValueError("WHATSAPP_GRAPH_API_VERSION must use the form vNN.N")
         return value
 
+    @field_validator("openai_model")
+    @classmethod
+    def validate_openai_model(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        if len(value) > 120:
+            raise ValueError("OPENAI_MODEL must be 120 characters or fewer")
+        return value.strip()
+
     @model_validator(mode="after")
     def reject_local_secret_in_production(self) -> "Settings":
         if self.app_env == "production" and self.app_secret_key.get_secret_value() == LOCAL_SECRET:
             raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
+        if self.openai_api_key is not None and self.openai_model is None:
+            raise ValueError("OPENAI_MODEL is required when OPENAI_API_KEY is configured")
         return self
 
 

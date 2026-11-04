@@ -435,6 +435,46 @@ async def list_whatsapp_conversation_messages(
 
 
 @router.post(
+    "/whatsapp/conversations/{conversation_id}/resolve",
+    status_code=status.HTTP_200_OK,
+)
+async def resolve_whatsapp_conversation(
+    conversation_id: UUID,
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> dict[str, str]:
+    result = await session.execute(
+        select(WhatsAppConversation)
+        .where(
+            WhatsAppConversation.id == conversation_id,
+            WhatsAppConversation.tenant_id == user.tenant_id,
+        )
+        .with_for_update()
+    )
+    conversation = result.scalar_one_or_none()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.is_opted_out:
+        raise HTTPException(
+            status_code=409,
+            detail="An opted-out customer conversation cannot be reopened for automated replies",
+        )
+    conversation.status = "active"
+    session.add(
+        AuditEvent(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            event_type="whatsapp.conversation.resolved",
+            subject_type="whatsapp_conversation",
+            subject_id=conversation.id,
+            payload={},
+        )
+    )
+    await session.commit()
+    return {"status": conversation.status}
+
+
+@router.post(
     "/whatsapp/messages",
     response_model=WhatsAppOutboundMessageResponse,
     status_code=status.HTTP_202_ACCEPTED,

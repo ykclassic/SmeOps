@@ -6,7 +6,7 @@ SmeOps is a multi-tenant WhatsApp-based AI customer assistant SaaS for appointme
 
 **Phase 1 — Core Platform and Business Operations: in progress.**
 
-The current foundation includes PostgreSQL persistence, tenant registration and authentication, service catalogue, business hours, appointment booking, retail orders, inventory approval, audit events, a durable job queue and signed WhatsApp webhook ingestion. It is not production-ready yet.
+The current foundation includes PostgreSQL persistence, tenant registration and authentication, service catalogue, business hours, appointment booking, retail orders, inventory approval, audit events, a durable job queue and signed WhatsApp webhook ingestion. A draft salon conversation workflow now collects a service, customer name, date and slot, checks deterministic availability, requests confirmation, and creates an idempotent appointment. It is not production-ready yet.
 
 ## Architecture baseline
 
@@ -18,7 +18,7 @@ The current foundation includes PostgreSQL persistence, tenant registration and 
 - Webhook event payloads are encrypted and deduplicated before being queued for background processing.
 - Background work is persisted in PostgreSQL and claimed with PostgreSQL row locking and SKIP LOCKED; webhook handlers acknowledge after durable persistence.
 - Tenant identity is derived from signed server-side authentication context, never trusted from client-supplied tenant IDs.
-- The LLM will not receive direct database access. It may only request explicitly authorized application tools in a later phase.
+- The optional OpenAI Responses API adapter classifies booking-start and human-escalation intent using strict structured output. The model has no database access or booking tools; all availability checks, validation and appointment writes remain deterministic backend operations. Without the optional model key, keyword-based intent fallback is used.
 
 ## Local development
 

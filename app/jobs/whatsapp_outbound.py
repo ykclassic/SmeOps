@@ -13,7 +13,11 @@ from app.integrations.whatsapp_cloud import (
     send_text_message,
 )
 from app.jobs.queue import ClaimedJob
-from app.models import WhatsAppConnection, WhatsAppOutboundMessage
+from app.models import (
+    WhatsAppConnection,
+    WhatsAppConversationMessage,
+    WhatsAppOutboundMessage,
+)
 from app.services.whatsapp_outbound import (
     OutboundPolicyViolation,
     assert_outbound_policy,
@@ -137,6 +141,19 @@ async def send_outbound_whatsapp_job(job: ClaimedJob) -> None:
         message.status = new_status
         message.last_error_code = error_code
         message.provider_message_id = provider_message_id
+        history_result = await session.execute(
+            select(WhatsAppConversationMessage)
+            .where(
+                WhatsAppConversationMessage.tenant_id == job.tenant_id,
+                WhatsAppConversationMessage.provider_message_id == f"outbound:{message.id}",
+            )
+            .with_for_update()
+        )
+        history_message = history_result.scalar_one_or_none()
+        if history_message is not None:
+            if provider_message_id is not None:
+                history_message.provider_message_id = provider_message_id
+            history_message.delivery_status = new_status
         if new_status == "sent":
             message.sent_at = datetime.now(UTC)
         await session.commit()

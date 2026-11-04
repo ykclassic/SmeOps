@@ -12,7 +12,7 @@ from app.core.whatsapp import (
     hash_whatsapp_contact,
 )
 from app.db.session import AsyncSessionFactory
-from app.jobs.queue import ClaimedJob
+from app.jobs.queue import ClaimedJob, enqueue_job
 from app.models import (
     WhatsAppConversation,
     WhatsAppConversationMessage,
@@ -32,7 +32,9 @@ def _provider_timestamp(value: object) -> datetime | None:
         return None
 
 
-async def _process_inbound_message(session, *, tenant_id: UUID, payload: dict) -> None:
+async def _process_inbound_message(
+    session, *, tenant_id: UUID, payload: dict
+) -> tuple[UUID, UUID] | None:
     message = payload.get("message")
     if not isinstance(message, dict):
         raise ValueError("Invalid inbound WhatsApp message payload")
@@ -56,7 +58,7 @@ async def _process_inbound_message(session, *, tenant_id: UUID, payload: dict) -
         )
     )
     if existing_message_result.scalar_one_or_none() is not None:
-        return
+        return None
 
     safe_message_type = (
         message_type if isinstance(message_type, str) and 1 <= len(message_type) <= 40
@@ -138,7 +140,8 @@ async def _process_inbound_message(session, *, tenant_id: UUID, payload: dict) -
             await session.flush()
     except IntegrityError:
         # Another worker may have won the provider-message uniqueness race.
-        return
+        return None
+    return conversation.id, conversation_message.id
 
 
 async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
@@ -227,12 +230,37 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
             elif message_status == "read":
                 outbound_message.read_at = datetime.now(UTC)
 
+            history_result = await session.execute(
+                select(WhatsAppConversationMessage)
+                .where(
+                    WhatsAppConversationMessage.tenant_id == job.tenant_id,
+                    WhatsAppConversationMessage.provider_message_id == provider_message_id,
+                )
+                .with_for_update()
+            )
+            history_message = history_result.scalar_one_or_none()
+            if history_message is not None:
+                history_message.delivery_status = message_status
+
         elif event.event_type == "message.received":
-            await _process_inbound_message(
+            persisted = await _process_inbound_message(
                 session,
                 tenant_id=job.tenant_id,
                 payload=payload,
             )
+            if persisted is not None:
+                conversation_id, message_id = persisted
+                await enqueue_job(
+                    session,
+                    tenant_id=job.tenant_id,
+                    job_type="whatsapp.process_conversation",
+                    payload={
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(message_id),
+                    },
+                    idempotency_key=f"wa:conversation:{message_id}",
+                    max_attempts=3,
+                )
 
         event.status = "processed"
         event.processed_at = datetime.now(UTC)
