@@ -107,7 +107,10 @@ async def send_outbound_whatsapp_job(job: ClaimedJob) -> None:
         )
         message = result.scalar_one_or_none()
         if message is None:
-            logger.error("Outbound WhatsApp ledger row disappeared", extra={"message_id": str(message_id)})
+            logger.error(
+                "Outbound WhatsApp ledger row disappeared",
+                extra={"message_id": str(message_id)},
+            )
             return
         if message.status not in {"sending", "unknown"}:
             logger.warning(
