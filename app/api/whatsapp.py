@@ -534,6 +534,50 @@ async def complete_embedded_signup(
 
 
 @router.post(
+    "/whatsapp/connection/disconnect",
+    response_model=WhatsAppConnectionResponse,
+)
+async def disable_whatsapp_connection(
+    session: DbSession,
+    user: OwnerOnly,
+) -> WhatsAppConnectionResponse:
+    result = await session.execute(
+        select(WhatsAppConnection)
+        .where(WhatsAppConnection.tenant_id == user.tenant_id)
+        .with_for_update()
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="WhatsApp connection not found",
+        )
+    if connection.status != "disabled":
+        connection.status = "disabled"
+        session.add(
+            AuditEvent(
+                tenant_id=user.tenant_id,
+                actor_user_id=user.id,
+                event_type="whatsapp.connection.disabled",
+                subject_type="whatsapp_connection",
+                subject_id=connection.id,
+                payload={"phone_number_id": connection.phone_number_id},
+            )
+        )
+        await session.commit()
+    return WhatsAppConnectionResponse(
+        tenant_id=connection.tenant_id,
+        phone_number_id=connection.phone_number_id,
+        business_account_id=connection.business_account_id,
+        status=connection.status,
+        display_phone_number=connection.display_phone_number,
+        verified_name=connection.verified_name,
+        token_expires_at=connection.token_expires_at,
+        onboarding_error_code=connection.onboarding_error_code,
+    )
+
+
+@router.post(
     "/whatsapp/connection/complete",
     response_model=WhatsAppConnectionResponse,
 )
