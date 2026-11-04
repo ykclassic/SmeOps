@@ -10,6 +10,7 @@ from app.models.whatsapp_conversation import (
     WhatsAppConversationMessage,
 )
 from app.models.whatsapp_outbound import WhatsAppOutboundMessage
+from app.models.worker import WorkerHeartbeat
 
 __all__ = [
     "Appointment",
@@ -29,4 +30,5 @@ __all__ = [
     "WhatsAppConversationMessage",
     "WhatsAppWebhookEvent",
     "WhatsAppOutboundMessage",
+    "WorkerHeartbeat",
 ]
