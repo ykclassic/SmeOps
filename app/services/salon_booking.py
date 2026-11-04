@@ -102,6 +102,7 @@ async def create_whatsapp_booking(
     customer_phone: str,
     starts_at: datetime,
     conversation_id: UUID,
+    booking_attempt_id: UUID,
 ) -> Appointment:
     tenant_result = await session.execute(
         select(Tenant)
@@ -115,7 +116,7 @@ async def create_whatsapp_booking(
     starts_at = starts_at.astimezone(UTC)
     idempotency_key = uuid5(
         BOOKING_NAMESPACE,
-        f"{conversation_id}:{service_id}:{starts_at.isoformat()}",
+        f"{conversation_id}:{booking_attempt_id}",
     )
     fingerprint_payload = {
         "service_id": str(service_id),
