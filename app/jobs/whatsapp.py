@@ -73,7 +73,19 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
                 # committed the provider message ID returned by Meta.
                 raise RuntimeError("Outbound message not yet correlated to provider status")
 
-            message.status = message_status
+            status_rank = {
+                "queued": 0,
+                "sending": 1,
+                "unknown": 1,
+                "sent": 2,
+                "delivered": 3,
+                "read": 4,
+                "failed": 4,
+            }
+            current_rank = status_rank.get(message.status, -1)
+            incoming_rank = status_rank[message_status]
+            if message.status not in {"read", "failed"} and incoming_rank >= current_rank:
+                message.status = message_status
             if message_status == "delivered":
                 message.delivered_at = datetime.now(UTC)
             elif message_status == "read":
