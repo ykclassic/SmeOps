@@ -146,16 +146,34 @@ def main() -> int:
                 f"/whatsapp/conversations/{conversation_id}/messages?limit=100",
                 headers=auth_headers,
             )
-            confirmation_found = any(
-                isinstance(item, dict)
+            inbound_messages = [
+                item
+                for item in messages
+                if isinstance(item, dict) and item.get("direction") == "inbound"
+            ]
+            if len(inbound_messages) < 6:
+                raise SystemExit(
+                    "The WhatsApp thread does not contain the complete six-step booking exchange."
+                )
+
+            confirmation_messages = [
+                item
+                for item in messages
+                if isinstance(item, dict)
                 and item.get("direction") == "outbound"
                 and "appointment is confirmed"
                 in str(item.get("body", "")).casefold()
-                for item in messages
-            )
-            if not confirmation_found:
+            ]
+            if not confirmation_messages:
                 raise SystemExit(
                     "The WhatsApp thread does not contain the booking confirmation reply."
+                )
+            if not any(
+                item.get("delivery_status") in {"delivered", "read"}
+                for item in confirmation_messages
+            ):
+                raise SystemExit(
+                    "Meta has not confirmed delivery or read status for the booking reply."
                 )
 
     print("SmeOps live API smoke checks passed.")
