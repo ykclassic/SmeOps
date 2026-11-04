@@ -7,11 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.whatsapp import decrypt_whatsapp_secret
-from app.jobs.queue import ClaimedJob
 from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
     classify_inbound_intent,
 )
+from app.jobs.queue import ClaimedJob
 from app.models import (
     Service,
     Tenant,
@@ -145,7 +145,11 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
             except ConversationAIUnavailable as exc:
                 logger.warning(
                     "Conversation intent interpreter unavailable; using deterministic fallback",
-                    extra={"error_type": type(exc.__cause__).__name__ if exc.__cause__ else "unknown"},
+                    extra={
+                        "error_type": (
+                            type(exc.__cause__).__name__ if exc.__cause__ else "unknown"
+                        )
+                    },
                 )
 
         if (
@@ -256,14 +260,18 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
             elif step == "awaiting_slot":
                 slots = booking.get("available_slots", [])
                 if not normalized.isdigit() or not 1 <= int(normalized) <= len(slots):
-                    reply = f"Please choose a listed time by replying with a number from 1 to {len(slots)}."
+                    reply = (
+                        "Please choose a listed time by replying with a number "
+                        f"from 1 to {len(slots)}."
+                    )
                 else:
                     selected_slot = datetime.fromisoformat(slots[int(normalized) - 1])
                     booking["starts_at"] = selected_slot.isoformat()
                     booking["step"] = "awaiting_confirmation"
                     reply = (
                         f"Please confirm: {booking['service_name']} for {booking['customer_name']} "
-                        f"on {selected_slot.astimezone(timezone).strftime('%A, %d %B at %I:%M %p')}. "
+                        "on "
+                        f"{selected_slot.astimezone(timezone).strftime('%A, %d %B at %I:%M %p')}. "
                         "Reply YES to confirm or NO to start again."
                     )
             elif step == "awaiting_confirmation":
