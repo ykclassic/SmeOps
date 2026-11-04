@@ -112,6 +112,15 @@ async def _process_inbound_message(session, *, tenant_id: UUID, payload: dict) -
     else:
         conversation.last_inbound_at = max(conversation.last_inbound_at, received_at)
 
+    if body is not None and body.strip().casefold() in {
+        "stop",
+        "unsubscribe",
+        "end",
+        "quit",
+    }:
+        conversation.is_opted_out = True
+        conversation.opted_out_at = received_at
+
     conversation_message = WhatsAppConversationMessage(
         id=uuid4(),
         tenant_id=tenant_id,
