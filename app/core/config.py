@@ -10,7 +10,11 @@ LOCAL_SECRET = "local-only-insecure-secret-change-before-deployment"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: Literal["local", "test", "staging", "production"] = "local"
     app_name: str = "SmeOps API"
@@ -62,7 +66,10 @@ class Settings(BaseSettings):
 
     @field_validator("whatsapp_token_encryption_key")
     @classmethod
-    def validate_whatsapp_encryption_key(cls, value: SecretStr | None) -> SecretStr | None:
+    def validate_whatsapp_encryption_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
         if value is None:
             return None
         try:
@@ -108,13 +115,17 @@ class Settings(BaseSettings):
             if self.whatsapp_token_encryption_key is None:
                 raise ValueError("WHATSAPP_TOKEN_ENCRYPTION_KEY is required in production")
             if self.whatsapp_verify_token is None or self.whatsapp_app_secret is None:
-                raise ValueError("WhatsApp webhook verification secrets are required in production")
+                raise ValueError(
+                    "WhatsApp webhook verification secrets are required in production"
+                )
             if (
                 self.meta_app_id is None
                 or self.meta_app_secret is None
                 or self.whatsapp_graph_api_version is None
             ):
-                raise ValueError("Meta Embedded Signup credentials are required in production")
+                raise ValueError(
+                    "Meta Embedded Signup credentials are required in production"
+                )
         if self.openai_api_key is not None and self.openai_model is None:
             raise ValueError("OPENAI_MODEL is required when OPENAI_API_KEY is configured")
         if (self.meta_app_id is None) != (self.meta_app_secret is None):
