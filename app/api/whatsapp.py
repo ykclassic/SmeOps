@@ -3,7 +3,6 @@ import hmac
 import json
 import logging
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -37,9 +36,9 @@ from app.schemas.whatsapp import (
     WhatsAppConnectionResponse,
     WhatsAppConversationMessageResponse,
     WhatsAppConversationResponse,
+    WhatsAppEmbeddedSignupRequest,
     WhatsAppOutboundMessageResponse,
     WhatsAppTextMessageRequest,
-    WhatsAppEmbeddedSignupRequest,
 )
 from app.services.whatsapp_onboarding import complete_pending_whatsapp_connection
 from app.services.whatsapp_outbound import (
