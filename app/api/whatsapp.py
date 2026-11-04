@@ -350,6 +350,30 @@ async def provision_whatsapp_connection(
 
 
 @router.get(
+    "/whatsapp/connection",
+    response_model=WhatsAppConnectionResponse | None,
+)
+async def get_whatsapp_connection(
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> WhatsAppConnectionResponse | None:
+    result = await session.execute(
+        select(WhatsAppConnection).where(
+            WhatsAppConnection.tenant_id == user.tenant_id,
+        )
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        return None
+    return WhatsAppConnectionResponse(
+        tenant_id=connection.tenant_id,
+        phone_number_id=connection.phone_number_id,
+        business_account_id=connection.business_account_id,
+        status=connection.status,
+    )
+
+
+@router.get(
     "/whatsapp/conversations",
     response_model=list[WhatsAppConversationResponse],
 )
