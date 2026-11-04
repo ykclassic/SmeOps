@@ -76,7 +76,7 @@ async def exchange_embedded_signup_code(
     app_secret: str,
     code: str,
 ) -> MetaAccessToken:
-    timeout = httpx.Timeout(12.0, connect=4.0)
+    timeout = httpx.Timeout(8.0, connect=3.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         payload = await _checked_request(
             client,
