@@ -145,10 +145,15 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
 
         if (
             normalized in HUMAN_WORDS
-            or (ai_intent is not None and ai_intent.confidence >= 0.7
-                and ai_intent.intent == "human_request")
+            or (
+                ai_intent is not None
+                and ai_intent.confidence >= 0.7
+                and ai_intent.intent == "human_request"
+            )
             or any(
-            phrase in normalized for phrase in ("speak to a person", "real person", "human agent")
+                phrase in normalized
+                for phrase in ("speak to a person", "real person", "human agent")
+            )
         ):
             conversation.status = "human_required"
             context["booking"] = {}
