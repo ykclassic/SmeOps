@@ -8,6 +8,10 @@ def test_liveness_returns_ok() -> None:
         response = client.get("/health/live")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_readiness_checks_database() -> None:
