@@ -2,6 +2,7 @@ import hashlib
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
@@ -11,6 +12,18 @@ from app.models import WhatsAppConnection, WhatsAppOutboundMessage
 
 class OutboundIdempotencyConflict(ValueError):
     """An outbound idempotency key was reused for different content."""
+
+
+def _matches_request(
+    message: WhatsAppOutboundMessage,
+    *,
+    recipient: str,
+    body: str,
+) -> bool:
+    return (
+        decrypt_whatsapp_secret(message.recipient_encrypted) == recipient
+        and decrypt_whatsapp_secret(message.body_encrypted) == body
+    )
 
 
 async def enqueue_whatsapp_text(
@@ -38,11 +51,11 @@ async def enqueue_whatsapp_text(
     )
     existing = existing_result.scalar_one_or_none()
     if existing is not None:
-        same_recipient = (
-            decrypt_whatsapp_secret(existing.recipient_encrypted) == normalized_recipient
-        )
-        same_body = decrypt_whatsapp_secret(existing.body_encrypted) == normalized_body
-        if not (same_recipient and same_body):
+        if not _matches_request(
+            existing,
+            recipient=normalized_recipient,
+            body=normalized_body,
+        ):
             raise OutboundIdempotencyConflict(
                 "Idempotency key was used with different message content"
             )
@@ -65,8 +78,28 @@ async def enqueue_whatsapp_text(
         idempotency_key=idempotency_key,
         status="queued",
     )
-    session.add(message)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(message)
+            await session.flush()
+    except IntegrityError:
+        duplicate_result = await session.execute(
+            select(WhatsAppOutboundMessage).where(
+                WhatsAppOutboundMessage.tenant_id == tenant_id,
+                WhatsAppOutboundMessage.idempotency_key == idempotency_key,
+            )
+        )
+        duplicate = duplicate_result.scalar_one_or_none()
+        if duplicate is None or not _matches_request(
+            duplicate,
+            recipient=normalized_recipient,
+            body=normalized_body,
+        ):
+            raise OutboundIdempotencyConflict(
+                "Idempotency key was concurrently used with different message content"
+            ) from None
+        return duplicate
+
     await enqueue_job(
         session,
         tenant_id=tenant_id,
