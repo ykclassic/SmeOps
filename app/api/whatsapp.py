@@ -24,6 +24,7 @@ from app.schemas.whatsapp import (
 )
 from app.services.whatsapp_outbound import (
     OutboundIdempotencyConflict,
+    OutboundPolicyViolation,
     enqueue_whatsapp_text,
 )
 
@@ -361,6 +362,16 @@ async def queue_whatsapp_text_message(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Idempotency key was already used for different message content",
+        ) from exc
+    except OutboundPolicyViolation as exc:
+        policy_status = (
+            status.HTTP_403_FORBIDDEN
+            if exc.error_code == "customer_opted_out"
+            else status.HTTP_409_CONFLICT
+        )
+        raise HTTPException(
+            status_code=policy_status,
+            detail=str(exc),
         ) from exc
     except ValueError as exc:
         raise HTTPException(
