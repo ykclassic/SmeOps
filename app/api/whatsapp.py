@@ -28,7 +28,10 @@ from app.services.whatsapp_outbound import (
 )
 
 router = APIRouter(tags=["whatsapp integration"])
-logger = logging.getLogger(__name__)\nManagerOrOwner = Annotated[User, Depends(require_roles("owner", "manager"))]
+logger = logging.getLogger(__name__)
+ManagerOrOwner = Annotated[
+    User, Depends(require_roles("owner", "manager"))
+]
 
 
 def _extract_event_payloads(payload: dict) -> Iterator[tuple[str, str, str, dict]]:
