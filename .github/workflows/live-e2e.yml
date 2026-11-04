@@ -30,6 +30,7 @@ jobs:
       E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
       E2E_CUSTOMER_PHONE: ${{ secrets.E2E_CUSTOMER_PHONE }}
       E2E_EXPECTED_SERVICE_NAME: ${{ vars.E2E_EXPECTED_SERVICE_NAME }}
+      E2E_VERIFY_CUSTOMER_BOOKING: ${{ inputs.verify_customer_booking }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
