@@ -17,7 +17,7 @@ The browser calls same-origin Next.js route handlers. The route handler proxies 
 
 Set `SMEOPS_API_BASE_URL` as a server-side environment variable in the frontend hosting environment. Do not prefix it with `NEXT_PUBLIC_`. The API must be reachable from the Next.js server over HTTPS in production.
 
-Meta Embedded Signup configuration variables are documented here but are not active until the onboarding increment is completed:
+Meta Embedded Signup v4 uses these frontend configuration variables:
 - `NEXT_PUBLIC_META_APP_ID`
 - `NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID`
 - `NEXT_PUBLIC_META_GRAPH_API_VERSION`
@@ -33,4 +33,8 @@ Meta Embedded Signup configuration variables are documented here but are not act
 - Weekly business-hours management.
 - WhatsApp connection status.
 
-The dashboard currently targets the first salon pilot. It does not yet include staff/resource calendars, payments, reporting exports, or full WhatsApp Embedded Signup.
+The dashboard currently targets the first salon pilot. It does not yet include staff/resource calendars, payments, reporting exports, or WhatsApp template management.
+
+## Live dashboard acceptance
+
+The Playwright smoke test is intentionally excluded from normal CI because it requires a deployed dashboard and dedicated test-account secrets. Run it through the repository's manual `Live acceptance tests` workflow after configuring the E2E variables and secrets in `docs/production-runbook.md`.
