@@ -36,6 +36,8 @@ def test_complete_salon_booking_conversation(monkeypatch):
 
     slug = f"salon-flow-{uuid4().hex[:10]}"
     phone = "2348012345678"
+    phone_number_id = f"123456{uuid4().int % 10**10:010d}"
+    business_account_id = f"987654{uuid4().int % 10**10:010d}"
     tenant_id: UUID | None = None
 
     try:
@@ -90,8 +92,8 @@ def test_complete_salon_booking_conversation(monkeypatch):
                 headers={"X-Platform-Admin-Key": "test-platform-admin-key-long-enough"},
                 json={
                     "tenant_id": str(tenant_id),
-                    "phone_number_id": "12345678901",
-                    "business_account_id": "10987654321",
+                    "phone_number_id": phone_number_id,
+                    "business_account_id": business_account_id,
                     "access_token": "test-meta-access-token-with-enough-length",
                 },
             )
@@ -125,7 +127,7 @@ def test_complete_salon_booking_conversation(monkeypatch):
                     "entry": [{
                         "changes": [{
                             "value": {
-                                "metadata": {"phone_number_id": "12345678901"},
+                                "metadata": {"phone_number_id": phone_number_id},
                                 "messages": [{
                                     "from": phone,
                                     "id": provider_id,
@@ -201,13 +203,14 @@ def test_complete_salon_booking_conversation(monkeypatch):
             assert messages.status_code == 200
             assert len(messages.json()) == 12
 
-        async def cleanup():
-            async with AsyncSessionFactory() as session:
-                tenant = await session.get(Tenant, tenant_id)
-                if tenant is not None:
-                    await session.delete(tenant)
-                    await session.commit()
-
-        asyncio.run(cleanup())
     finally:
+        if tenant_id is not None:
+            async def cleanup():
+                async with AsyncSessionFactory() as session:
+                    tenant = await session.get(Tenant, tenant_id)
+                    if tenant is not None:
+                        await session.delete(tenant)
+                        await session.commit()
+
+            asyncio.run(cleanup())
         get_settings.cache_clear()
