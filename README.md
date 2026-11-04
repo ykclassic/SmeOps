@@ -109,7 +109,7 @@ Backend API and worker:
 - `APP_SECRET_KEY` — unique JWT/HMAC secret, at least 32 characters.
 - `DATABASE_URL` — PostgreSQL connection string. `postgres://` and `postgresql://` are normalized to the asyncpg driver.
 - `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` — webhook verification and signature validation.
-- `WHATSAPP_TOKEN_ENCRYPTION_KEY` — Fernet key; encrypts business access tokens, customer data and two-step PINs.
+- `WHATSAPP_TOKEN_ENCRYPTION_KEY` — Fernet key; encrypts business access tokens, customer data and the temporary onboarding PIN (which is erased after successful number registration).
 - `WHATSAPP_GRAPH_API_VERSION` — pinned Meta Graph API version, `vNN.N`.
 - `META_APP_ID`, `META_APP_SECRET` — Meta application credentials; app secret stays server-side.
 - `PLATFORM_ADMIN_KEY` — protects the legacy internal provisioning endpoint.
