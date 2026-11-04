@@ -3,13 +3,13 @@ from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    JSON,
     String,
     Text,
     UniqueConstraint,
