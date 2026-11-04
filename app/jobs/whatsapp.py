@@ -84,14 +84,18 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
             }
             current_rank = status_rank.get(message.status, -1)
             incoming_rank = status_rank[message_status]
-            if message.status not in {"read", "failed"} and incoming_rank >= current_rank:
+            should_advance = (
+                message.status not in {"read", "failed"}
+                and incoming_rank >= current_rank
+            )
+            if should_advance:
                 message.status = message_status
+                if message_status == "failed":
+                    message.last_error_code = "provider_delivery_failed"
             if message_status == "delivered":
                 message.delivered_at = datetime.now(UTC)
             elif message_status == "read":
                 message.read_at = datetime.now(UTC)
-            elif message_status == "failed":
-                message.last_error_code = "provider_delivery_failed"
 
             event.status = "processed"
             event.processed_at = datetime.now(UTC)
