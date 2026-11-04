@@ -13,7 +13,11 @@ from app.integrations.whatsapp_cloud import (
     send_text_message,
 )
 from app.jobs.queue import ClaimedJob
-from app.models import (\n    WhatsAppConnection,\n    WhatsAppConversationMessage,\n    WhatsAppOutboundMessage,\n)
+from app.models import (
+    WhatsAppConnection,
+    WhatsAppConversationMessage,
+    WhatsAppOutboundMessage,
+)
 from app.services.whatsapp_outbound import (
     OutboundPolicyViolation,
     assert_outbound_policy,
