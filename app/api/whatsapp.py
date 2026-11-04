@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.dependencies import CurrentUser, DbSession, require_roles
+from app.api.dependencies import DbSession, require_roles
 from app.core.config import get_settings
 from app.core.whatsapp import encrypt_whatsapp_secret
 from app.jobs.queue import enqueue_job
