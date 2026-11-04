@@ -19,7 +19,7 @@ async def complete_pending_whatsapp_connection(
     session: AsyncSession,
     *,
     connection: WhatsAppConnection,
-    actor_user_id: UUID,
+    actor_user_id: UUID | None,
     api_version: str,
 ) -> WhatsAppConnection:
     access_token = decrypt_whatsapp_secret(connection.access_token_encrypted)
