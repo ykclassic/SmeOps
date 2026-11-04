@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -33,3 +34,21 @@ class WhatsAppOutboundMessageResponse(BaseModel):
     status: Literal[
         "queued", "sending", "sent", "delivered", "read", "failed", "unknown"
     ]
+
+
+class WhatsAppConversationResponse(BaseModel):
+    id: UUID
+    customer_phone: str
+    status: Literal["active", "human_required", "closed"]
+    last_inbound_at: datetime
+    is_opted_out: bool
+    opted_out_at: datetime | None
+
+
+class WhatsAppConversationMessageResponse(BaseModel):
+    id: UUID
+    direction: Literal["inbound", "outbound"]
+    message_type: str
+    body: str | None
+    delivery_status: str
+    occurred_at: datetime
