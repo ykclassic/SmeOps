@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 from datetime import UTC, date, datetime, timedelta
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -223,6 +223,7 @@ async def create_whatsapp_booking(
         raise BookingConflict("The salon account has no active owner")
 
     appointment = Appointment(
+        id=uuid4(),
         tenant_id=tenant_id,
         idempotency_key=idempotency_key,
         request_fingerprint=fingerprint,
