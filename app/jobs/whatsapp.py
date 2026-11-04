@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 import logging
 from datetime import UTC, datetime
@@ -8,8 +6,11 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.core.config import get_settings
-from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
+from app.core.whatsapp import (
+    decrypt_whatsapp_secret,
+    encrypt_whatsapp_secret,
+    hash_whatsapp_contact,
+)
 from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob
 from app.models import (
@@ -20,11 +21,6 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _customer_phone_hash(phone: str) -> str:
-    key = get_settings().app_secret_key.get_secret_value().encode()
-    return hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
 
 
 def _provider_timestamp(value: object) -> datetime | None:
@@ -76,7 +72,7 @@ async def _process_inbound_message(session, *, tenant_id: UUID, payload: dict) -
 
     provider_timestamp = _provider_timestamp(message.get("timestamp"))
     received_at = provider_timestamp or datetime.now(UTC)
-    phone_hash = _customer_phone_hash(sender)
+    phone_hash = hash_whatsapp_contact(sender)
 
     conversation_result = await session.execute(
         select(WhatsAppConversation)
