@@ -87,10 +87,10 @@ Recommended E2E variables:
 - `E2E_TEST_EMAIL` — test owner email.
 - `E2E_TEST_PASSWORD` — test owner password.
 - `E2E_CUSTOMER_PHONE` — dedicated test WhatsApp customer number.
-- `E2E_EXPECTED_SERVICE` — known configured test service.
+- `E2E_EXPECTED_SERVICE_NAME` — known configured test service.
 - `E2E_META_TEST_NUMBER` — Meta test business number, if applicable.
 
-The test owner account must belong to a dedicated non-production or isolated test tenant. Never use a real customer's account or phone number for automated acceptance.
+The test owner account must belong to a dedicated non-production or isolated test tenant. Never use a real customer's account or phone number for automated acceptance. The Meta business number must be connected through the real Embedded Signup flow before the workflow is run.
 
 Configure these GitHub Actions repository or environment variables/secrets:
 
