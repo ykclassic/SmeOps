@@ -117,7 +117,7 @@ async def enqueue_whatsapp_text(
             )
         return existing
 
-    await assert_outbound_policy(
+    conversation = await assert_outbound_policy(
         session,
         tenant_id=tenant_id,
         recipient=normalized_recipient,
