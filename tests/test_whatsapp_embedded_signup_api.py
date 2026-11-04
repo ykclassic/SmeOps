@@ -151,13 +151,14 @@ def test_embedded_signup_persists_encrypted_connection_and_supports_retry(monkey
                 "whatsapp.connection.connected",
             }.issubset(event_types)
 
-        async def cleanup():
-            async with AsyncSessionFactory() as session:
-                tenant = await session.get(Tenant, tenant_id)
-                if tenant is not None:
-                    await session.delete(tenant)
-                    await session.commit()
-
-        asyncio.run(cleanup())
     finally:
+        if tenant_id is not None:
+            async def cleanup():
+                async with AsyncSessionFactory() as session:
+                    tenant = await session.get(Tenant, tenant_id)
+                    if tenant is not None:
+                        await session.delete(tenant)
+                        await session.commit()
+
+            asyncio.run(cleanup())
         get_settings.cache_clear()
