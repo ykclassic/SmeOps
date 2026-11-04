@@ -48,7 +48,11 @@ type Connection = {
   tenant_id: string;
   phone_number_id: string;
   business_account_id: string;
-  status: string;
+  status: "pending" | "active" | "disabled";
+  display_phone_number?: string | null;
+  verified_name?: string | null;
+  token_expires_at?: string | null;
+  onboarding_error_code?: string | null;
 } | null;
 
 type Tab = "overview" | "appointments" | "inbox" | "services" | "hours" | "whatsapp";
