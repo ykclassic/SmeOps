@@ -70,7 +70,15 @@ services:
         sync: false
       - key: WHATSAPP_TOKEN_ENCRYPTION_KEY
         sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
       - key: WHATSAPP_GRAPH_API_VERSION
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
         sync: false
       - key: OPENAI_API_KEY
         sync: false
