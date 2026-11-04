@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.services.whatsapp_outbound import (
     OutboundIdempotencyConflict,
+    OutboundPolicyViolation,
     enqueue_whatsapp_text,
 )
 
@@ -229,8 +230,6 @@ async def test_expired_customer_service_window_blocks_enqueue():
         await session.commit()
 
     async with AsyncSessionFactory() as session:
-        from app.services.whatsapp_outbound import OutboundPolicyViolation
-
         with pytest.raises(OutboundPolicyViolation) as exc_info:
             await enqueue_whatsapp_text(
                 session,
