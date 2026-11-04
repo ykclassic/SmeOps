@@ -1,3 +1,4 @@
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -29,7 +30,7 @@ async def operations_summary(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Operations access is not configured",
         )
-    if admin_key is None or not __import__("hmac").compare_digest(
+    if admin_key is None or not hmac.compare_digest(
         admin_key.encode(),
         expected_key.get_secret_value().encode(),
     ):
