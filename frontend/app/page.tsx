@@ -252,6 +252,24 @@ export default function HomePage() {
     );
   }
 
+  async function disableWhatsAppConnection() {
+    if (!window.confirm("Disable SmeOps messaging for this WhatsApp number?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<Connection>("whatsapp/connection/disconnect", {
+        method: "POST",
+        body: "{}",
+      });
+      setConnection(result);
+      setNotice("SmeOps messaging has been disabled for this number.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not disable WhatsApp connection");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retryWhatsAppConnection() {
     setBusy(true);
     setError("");
@@ -767,6 +785,7 @@ export default function HomePage() {
                       <span>Verified name</span><strong>{connection.verified_name ?? "Not returned by Meta"}</strong>
                       <span>WhatsApp Business Account</span><strong>{connection.business_account_id}</strong>
                       {connection.token_expires_at && <><span>Token expiry</span><strong>{dateTime(connection.token_expires_at)}</strong></>}
+                      <button className="button button-danger-quiet disconnect-button" onClick={disableWhatsAppConnection} disabled={busy}>Disable connection</button>
                     </div>
                   ) : connection?.status === "pending" ? (
                     <div className="stack-form embedded-form">
