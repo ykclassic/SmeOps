@@ -16,6 +16,7 @@ from app.models import (
     AuditEvent,
     WhatsAppConnection,
     WhatsAppConversation,
+    WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
 )
 
