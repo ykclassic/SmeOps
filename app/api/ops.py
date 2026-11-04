@@ -84,14 +84,22 @@ async def operations_summary(
     )
     webhook_counts = {name: count for name, count in webhook_result.all()}
 
-    token_result = await session.execute(
+    expiring_token_result = await session.execute(
         select(func.count(WhatsAppConnection.id)).where(
             WhatsAppConnection.status == "active",
-            WhatsAppConnection.token_expires_at.is_not(None),
+            WhatsAppConnection.token_expires_at > now,
             WhatsAppConnection.token_expires_at <= now + timedelta(days=7),
         )
     )
-    expiring_tokens = token_result.scalar_one()
+    expiring_tokens = expiring_token_result.scalar_one()
+    expired_token_result = await session.execute(
+        select(func.count(WhatsAppConnection.id)).where(
+            WhatsAppConnection.status == "active",
+            WhatsAppConnection.token_expires_at.is_not(None),
+            WhatsAppConnection.token_expires_at <= now,
+        )
+    )
+    expired_tokens = expired_token_result.scalar_one()
 
     return {
         "generated_at": now.isoformat(),
@@ -113,4 +121,5 @@ async def operations_summary(
         "outbound_messages": outbound_counts,
         "webhook_events": webhook_counts,
         "whatsapp_tokens_expiring_within_7_days": expiring_tokens,
+        "whatsapp_tokens_expired": expired_tokens,
     }
