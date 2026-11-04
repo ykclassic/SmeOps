@@ -423,7 +423,10 @@ async def complete_embedded_signup(
         if active_onboarding.scalar_one_or_none() is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="WhatsApp onboarding is still processing. Retry or wait for the worker to finish.",
+                detail=(
+                    "WhatsApp onboarding is still processing. "
+                    "Retry or wait for the worker to finish."
+                ),
             )
 
     try:
