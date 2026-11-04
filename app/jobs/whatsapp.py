@@ -227,6 +227,18 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
             elif message_status == "read":
                 outbound_message.read_at = datetime.now(UTC)
 
+            history_result = await session.execute(
+                select(WhatsAppConversationMessage)
+                .where(
+                    WhatsAppConversationMessage.tenant_id == job.tenant_id,
+                    WhatsAppConversationMessage.provider_message_id == provider_message_id,
+                )
+                .with_for_update()
+            )
+            history_message = history_result.scalar_one_or_none()
+            if history_message is not None:
+                history_message.delivery_status = message_status
+
         elif event.event_type == "message.received":
             persisted = await _process_inbound_message(
                 session,
