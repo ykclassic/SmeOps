@@ -197,8 +197,7 @@ export default function HomePage() {
         }),
       });
       setConnection(result);
-      setSignupStatus("WhatsApp is connected and ready for inbound messages.");
-      setNotice("WhatsApp Business account connected.");
+      setSignupStatus("Meta authorization saved. Finishing number registration in the background.");
     } catch (reason) {
       const pending = await api<Connection>("whatsapp/connection").catch(() => null);
       setConnection(pending);
@@ -279,8 +278,7 @@ export default function HomePage() {
         body: "{}",
       });
       setConnection(result);
-      setSignupStatus("WhatsApp is connected and ready for inbound messages.");
-      setNotice("WhatsApp connection completed.");
+      setSignupStatus("Connection retry queued. Waiting for the worker to finish registration.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Connection retry failed");
       const pending = await api<Connection>("whatsapp/connection").catch(() => null);
@@ -414,6 +412,41 @@ export default function HomePage() {
     window.addEventListener("message", handleMetaMessage);
     return () => window.removeEventListener("message", handleMetaMessage);
   }, [completeSignup]);
+
+  useEffect(() => {
+    if (!user || connection?.status !== "pending") return;
+    let active = true;
+    let attempts = 0;
+    const timer = window.setInterval(async () => {
+      attempts += 1;
+      const current = await api<Connection>("whatsapp/connection").catch(() => null);
+      if (!active) return;
+      if (current) {
+        setConnection(current);
+        if (current.status === "active") {
+          setSignupStatus("WhatsApp is connected and ready for inbound messages.");
+          setNotice("WhatsApp Business account connected.");
+          window.clearInterval(timer);
+          return;
+        }
+        if (current.onboarding_error_code) {
+          setSignupStatus(
+            `Meta onboarding needs attention (${current.onboarding_error_code}). Retry or restart the connection.`,
+          );
+        }
+      }
+      if (attempts >= 20) {
+        window.clearInterval(timer);
+        setSignupStatus(
+          "Connection is still pending. Check worker health, then retry if the connection has not completed.",
+        );
+      }
+    }, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [user, connection?.status]);
 
   useEffect(() => {
     let mounted = true;
