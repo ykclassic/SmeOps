@@ -100,6 +100,11 @@ async def test_outbound_message_is_encrypted_and_idempotent():
     assert job.max_attempts == 1
     assert job.status == "queued"
 
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        await session.delete(persisted_tenant)
+        await session.commit()
+
 
 @pytest.mark.asyncio
 async def test_unknown_provider_outcome_is_not_retried(monkeypatch):
@@ -139,3 +144,8 @@ async def test_unknown_provider_outcome_is_not_retried(monkeypatch):
     assert persisted is not None
     assert persisted.status == "unknown"
     assert persisted.last_error_code == "provider_outcome_unknown"
+
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        await session.delete(persisted_tenant)
+        await session.commit()
