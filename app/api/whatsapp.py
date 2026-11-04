@@ -392,9 +392,9 @@ async def complete_embedded_signup(
             detail="This WhatsApp number is already connected to another workspace",
         )
     existing_precheck = await session.execute(
-        select(WhatsAppConnection).where(
-            WhatsAppConnection.tenant_id == user.tenant_id,
-        )
+        select(WhatsAppConnection)
+        .where(WhatsAppConnection.tenant_id == user.tenant_id)
+        .with_for_update()
     )
     existing_connection = existing_precheck.scalar_one_or_none()
     if (
@@ -406,6 +406,25 @@ async def complete_embedded_signup(
             status_code=status.HTTP_409_CONFLICT,
             detail="Disconnect the current WhatsApp number before connecting a different number",
         )
+
+    if existing_connection is not None and existing_connection.status == "pending":
+        active_onboarding = await session.execute(
+            select(BackgroundJob.id)
+            .where(
+                BackgroundJob.tenant_id == user.tenant_id,
+                BackgroundJob.job_type == "whatsapp.complete_signup",
+                BackgroundJob.status.in_(["queued", "running"]),
+                BackgroundJob.idempotency_key.like(
+                    f"wa:onboarding%:{existing_connection.id}:%"
+                ),
+            )
+            .limit(1)
+        )
+        if active_onboarding.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="WhatsApp onboarding is still processing. Retry or wait for the worker to finish.",
+            )
 
     try:
         token = await exchange_embedded_signup_code(
