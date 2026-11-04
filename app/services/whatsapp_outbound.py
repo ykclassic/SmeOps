@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
 from app.jobs.queue import enqueue_job
-from app.models import WhatsAppConnection, WhatsAppOutboundMessage
+from app.models import AuditEvent, WhatsAppConnection, WhatsAppOutboundMessage
 
 
 class OutboundIdempotencyConflict(ValueError):
@@ -33,6 +33,7 @@ async def enqueue_whatsapp_text(
     recipient: str,
     body: str,
     idempotency_key: str,
+    actor_user_id: UUID | None = None,
 ) -> WhatsAppOutboundMessage:
     normalized_recipient = recipient.strip().lstrip("+")
     if not normalized_recipient.isdigit() or not 8 <= len(normalized_recipient) <= 15:
@@ -100,6 +101,20 @@ async def enqueue_whatsapp_text(
             ) from None
         return duplicate
 
+    session.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            actor_user_id=actor_user_id,
+            event_type="whatsapp.message.queued",
+            subject_type="whatsapp_outbound_message",
+            subject_id=message.id,
+            payload={
+                "idempotency_key_sha256": hashlib.sha256(
+                    idempotency_key.encode()
+                ).hexdigest()
+            },
+        )
+    )
     await enqueue_job(
         session,
         tenant_id=tenant_id,
