@@ -3,6 +3,9 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
+from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert
+
 from app.db.session import AsyncSessionFactory
 from app.jobs.queue import (
     ClaimedJob,
@@ -11,6 +14,7 @@ from app.jobs.queue import (
     complete_job,
     fail_job,
 )
+from app.models import WorkerHeartbeat
 
 logger = logging.getLogger(__name__)
 JobHandler = Callable[[ClaimedJob], Awaitable[None]]
@@ -144,4 +148,5 @@ async def run_forever(
                     )
                 except TimeoutError:
                     pass
-\n    await _safe_worker_heartbeat(worker_id, stopped=True)\n
+
+    await _safe_worker_heartbeat(worker_id, stopped=True)
