@@ -110,6 +110,16 @@ def test_embedded_signup_persists_encrypted_connection_and_supports_retry(monkey
             assert "access_token" not in completed.json()
             assert "two_step_pin" not in completed.json()
 
+            disconnected = client.post(
+                "/whatsapp/connection/disconnect",
+                headers=auth,
+                json={},
+            )
+            assert disconnected.status_code == 200
+            assert disconnected.json()["status"] == "disabled"
+            disabled_status = client.get("/whatsapp/connection", headers=auth)
+            assert disabled_status.json()["status"] == "disabled"
+
             async def inspect_persistence():
                 async with AsyncSessionFactory() as session:
                     result = await session.execute(
@@ -126,6 +136,7 @@ def test_embedded_signup_persists_encrypted_connection_and_supports_retry(monkey
                                     "whatsapp.connection.onboarding_started",
                                     "whatsapp.connection.onboarding_failed",
                                     "whatsapp.connection.connected",
+                                    "whatsapp.connection.disabled",
                                 ]
                             ),
                         )
@@ -142,13 +153,14 @@ def test_embedded_signup_persists_encrypted_connection_and_supports_retry(monkey
             status_value, stored_token, stored_pin, event_types = asyncio.run(
                 inspect_persistence()
             )
-            assert status_value == "active"
+            assert status_value == "disabled"
             assert stored_token == "test-business-integration-token-123456"
             assert stored_pin == "123456"
             assert {
                 "whatsapp.connection.onboarding_started",
                 "whatsapp.connection.onboarding_failed",
                 "whatsapp.connection.connected",
+                "whatsapp.connection.disabled",
             }.issubset(event_types)
 
     finally:
