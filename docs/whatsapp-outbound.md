@@ -38,3 +38,15 @@ Do not put real credentials in source control or test fixtures. Inject productio
 - Delivery status webhooks can arrive before the sender commits its provider message ID. The event job retries with bounded backoff and then dead-letters; dead-letter reconciliation is still an operational follow-up.
 - The authenticated send route does not yet enforce the WhatsApp 24-hour customer-service window, approved templates or customer opt-out preferences. Use it only for controlled testing with opted-in recipients and an eligible active conversation. Do not use it for unrestricted production messaging.
 - This increment has automated adapter and database tests, but no live Meta account or real phone-number delivery verification is claimed.
+
+
+## Inbound conversation persistence (draft increment)
+
+Verified inbound webhook events of type `message.received` are now processed into a tenant-scoped conversation inbox.
+
+- Conversation lookup uses an HMAC-SHA256 of the normalized sender number with the application secret; the sender number itself is Fernet-encrypted.
+- Provider message IDs are unique per tenant, so worker retries do not create duplicate message history.
+- Text message bodies are Fernet-encrypted. Non-text message types are retained as metadata without attempting to download or interpret media.
+- Provider timestamps are stored in UTC. Invalid or absent timestamps fall back to the worker receipt time for conversation ordering while the original timestamp remains null.
+- Webhook events are marked processed only after the conversation/message write succeeds.
+- The worker does not yet send an automatic response, invoke an LLM, create bookings, or expose a tenant dashboard. Those are separate next increments.
