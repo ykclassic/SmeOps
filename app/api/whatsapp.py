@@ -379,6 +379,33 @@ async def complete_embedded_signup(
             detail="WhatsApp Embedded Signup is not configured",
         )
 
+    other_owner_precheck = await session.execute(
+        select(WhatsAppConnection.tenant_id).where(
+            WhatsAppConnection.phone_number_id == request.phone_number_id,
+            WhatsAppConnection.tenant_id != user.tenant_id,
+        )
+    )
+    if other_owner_precheck.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This WhatsApp number is already connected to another workspace",
+        )
+    existing_precheck = await session.execute(
+        select(WhatsAppConnection).where(
+            WhatsAppConnection.tenant_id == user.tenant_id,
+        )
+    )
+    existing_connection = existing_precheck.scalar_one_or_none()
+    if (
+        existing_connection is not None
+        and existing_connection.status == "active"
+        and existing_connection.phone_number_id != request.phone_number_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disconnect the current WhatsApp number before connecting a different number",
+        )
+
     try:
         token = await exchange_embedded_signup_code(
             api_version=settings.whatsapp_graph_api_version,
