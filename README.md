@@ -64,8 +64,8 @@ Prices are represented as integer minor currency units (kobo) and currency is cu
 - The generic job queue supports idempotent enqueueing, bounded retries, expiring worker leases, and dead-letter state. Job handlers must be idempotent because a worker can lose its lease after an external side effect.
 - WhatsApp access tokens are encrypted with Fernet. The encryption key must be stored separately in a secret manager and backed up securely; losing it makes stored tokens unrecoverable.
 - The internal WhatsApp connection provisioning endpoint is protected by a shared platform-admin key. This is a pilot provisioning mechanism, not a replacement for a proper Meta Embedded Signup and platform operator identity workflow.
-- Inbound WhatsApp events are encrypted, deduplicated and queued. The current worker only marks inbound events as accepted; conversation orchestration and customer replies are not implemented yet.
-- Outbound WhatsApp messaging, durable outbound outbox delivery, delivery-status reconciliation and credential rotation are not implemented yet.
+- Inbound WhatsApp events are encrypted, deduplicated and queued. Text and non-text inbound messages are normalized into tenant-scoped conversations and message history; customer phone numbers and text bodies are encrypted at rest, with a keyed hash used for conversation lookup. Automated replies and AI orchestration are not implemented yet.
+- Outbound text messaging, durable outbound outbox delivery and delivery-status reconciliation are implemented in the current draft branch. Messaging-policy enforcement (24-hour service window, approved templates and opt-out), credential rotation and live Meta delivery verification remain outstanding.
 - Registration/login rate limiting, email verification, password reset, refresh-token rotation, full audit-log access/retention controls and automated data-subject deletion are not yet implemented.
 - Appointment rescheduling, customer self-service and resource/staff-specific scheduling are not yet implemented.
 - Do not expose this API publicly as a production service until those controls and the remaining Phase 1 exit criteria are complete.
