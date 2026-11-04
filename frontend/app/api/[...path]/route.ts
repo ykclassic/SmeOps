@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 15;
+
 export const dynamic = "force-dynamic";
 
 const SESSION_COOKIE = "smeops_session";
