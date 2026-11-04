@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "phase-1/**", "phase-2/**", "phase-3/**", "phase-4/**"]
   pull_request:
-    branches: ["main", "phase-1/**", "phase-2/**"]
+    branches: ["main", "phase-1/**", "phase-2/**", "phase-3/**", "phase-4/**"]
 
 permissions:
   contents: read
