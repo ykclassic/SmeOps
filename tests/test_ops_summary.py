@@ -25,6 +25,7 @@ def test_operations_summary_requires_platform_key_and_returns_aggregate_data(mon
                 "outbound_messages",
                 "webhook_events",
                 "whatsapp_tokens_expiring_within_7_days",
+                "whatsapp_tokens_expired",
             }
             assert set(payload["jobs"]) == {
                 "queued",
