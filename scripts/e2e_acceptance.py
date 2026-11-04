@@ -114,9 +114,14 @@ def main() -> int:
                 and item.get("status") == "confirmed"
                 and service_names.get(item.get("service_id")) == expected_service
             ]
-            if len(matching_appointments) != 1:
+            if not matching_appointments:
                 raise SystemExit(
-                    "Expected exactly one confirmed test-customer appointment for the selected service."
+                    "No confirmed test-customer appointment exists for the selected service."
+                )
+            starts = [item.get("starts_at") for item in matching_appointments]
+            if len(starts) != len(set(starts)):
+                raise SystemExit(
+                    "Duplicate confirmed appointments exist for the same test-customer slot."
                 )
 
             matching_conversations = [
