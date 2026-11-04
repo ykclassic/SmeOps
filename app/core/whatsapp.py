@@ -1,6 +1,14 @@
+import hashlib
+import hmac
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import get_settings
+
+
+def hash_whatsapp_contact(phone: str) -> str:
+    key = get_settings().app_secret_key.get_secret_value().encode()
+    return hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
 
 
 def _fernet() -> Fernet:
