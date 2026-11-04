@@ -7,6 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import Tenant, User
+from app.services.auth_rate_limit import (
+    AuthRateLimitExceeded,
+    clear_auth_attempts,
+    consume_auth_attempt,
+)
 from app.schemas.auth import (
     CurrentUserResponse,
     LoginRequest,
@@ -19,6 +24,20 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, session: DbSession) -> TokenResponse:
+    rate_limit_identifier = f"{payload.tenant_slug}:{str(payload.email).strip().lower()}"
+    try:
+        await consume_auth_attempt(
+            session,
+            scope="register",
+            identifier=rate_limit_identifier,
+        )
+    except AuthRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts. Try again later.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
     existing = await session.execute(select(Tenant.id).where(Tenant.slug == payload.tenant_slug))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Business identifier is unavailable")
@@ -48,12 +67,31 @@ async def register(payload: RegisterRequest, session: DbSession) -> TokenRespons
             detail="Business identifier or account already exists",
         ) from exc
 
+    await clear_auth_attempts(
+        session,
+        scope="register",
+        identifier=rate_limit_identifier,
+    )
     token = create_access_token(user_id=user.id, tenant_id=tenant.id)
     return TokenResponse(access_token=token)
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, session: DbSession) -> TokenResponse:
+    rate_limit_identifier = f"{payload.tenant_slug}:{str(payload.email).strip().lower()}"
+    try:
+        await consume_auth_attempt(
+            session,
+            scope="login",
+            identifier=rate_limit_identifier,
+        )
+    except AuthRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
     result = await session.execute(
         select(User)
         .join(Tenant, Tenant.id == User.tenant_id)
@@ -75,6 +113,11 @@ async def login(payload: LoginRequest, session: DbSession) -> TokenResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    await clear_auth_attempts(
+        session,
+        scope="login",
+        identifier=rate_limit_identifier,
+    )
     token = create_access_token(user_id=user.id, tenant_id=user.tenant_id)
     return TokenResponse(access_token=token)
 
