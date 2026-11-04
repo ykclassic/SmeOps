@@ -108,6 +108,7 @@ export default function HomePage() {
   });
   const [services, setServices] = useState<Service[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [hoursConfigured, setHoursConfigured] = useState(false);
   const [hours, setHours] = useState<BusinessHour[]>(
     weekdays.map((_, weekday) => ({
       weekday,
@@ -144,6 +145,7 @@ export default function HomePage() {
       ]);
     setServices(serviceData);
     setAppointments(appointmentData);
+    setHoursConfigured(hourData.length === 7);
     setHours(
       hourData.length === 7
         ? hourData
@@ -444,7 +446,7 @@ export default function HomePage() {
                 </section>
                 <section className="panel setup-panel"><div className="panel-heading"><div><h2>Workspace setup</h2><p>Complete these steps to go live</p></div></div>
                   <SetupStep done={services.length > 0} title="Add your services" detail="Set service names, duration and prices" onClick={() => setTab("services")} />
-                  <SetupStep done={hours.length === 7} title="Set opening hours" detail="Tell customers when you are available" onClick={() => setTab("hours")} />
+                  <SetupStep done={hoursConfigured} title="Set opening hours" detail="Tell customers when you are available" onClick={() => setTab("hours")} />
                   <SetupStep done={connection?.status === "active"} title="Connect WhatsApp" detail="Link your business number" onClick={() => setTab("whatsapp")} />
                 </section>
               </div>
