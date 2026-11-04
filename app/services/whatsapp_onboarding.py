@@ -77,6 +77,8 @@ async def complete_pending_whatsapp_connection(
     connection.verified_name = phone.verified_name
     connection.status = "active"
     connection.onboarding_error_code = None
+    # The PIN is only needed until Meta accepts phone registration.
+    connection.two_step_verification_pin_encrypted = None
     session.add(
         AuditEvent(
             tenant_id=connection.tenant_id,
