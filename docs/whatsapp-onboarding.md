@@ -46,10 +46,10 @@ Do not set `META_APP_SECRET`, WhatsApp access tokens, or encryption keys as `NEX
 2. The browser launches Facebook Login for Business using the v4 configuration ID.
 3. The browser receives the exchangeable authorization code from the FB.login callback and receives WABA/phone-number IDs through the `WA_EMBEDDED_SIGNUP` session message. These are separate channels and may arrive in either order.
 4. The browser sends the code and IDs to the authenticated owner-only SmeOps endpoint. The code is never exchanged in the browser.
-5. The backend exchanges the short-lived code with Meta, encrypts the returned business integration token and PIN, and persists the connection as `pending`.
-6. The backend verifies the selected phone number belongs to the selected WABA, subscribes the SmeOps app to WABA webhooks, and registers the number with the submitted two-step PIN.
-7. Only after all steps succeed does the backend mark the connection `active`.
-8. If a post-exchange step fails, the connection remains `pending` with a sanitized error code. The owner can use Retry connection without exposing or re-entering the business token.
+5. The backend exchanges the short-lived code with Meta, encrypts the returned business integration token and PIN, persists the connection as `pending`, and enqueues a durable onboarding job.
+6. The worker verifies the selected phone number belongs to the selected WABA, subscribes the SmeOps app to WABA webhooks, and registers the number with the submitted two-step PIN.
+7. The dashboard polls the connection status. Only after all Graph API steps succeed does the worker mark the connection `active`.
+8. If a post-exchange step fails, the worker retries the durable job up to its configured attempt limit. The connection remains `pending` with a sanitized error code if the job exhausts its attempts. The owner can enqueue a retry without exposing or re-entering the business token.
 
 ## Security and operational controls
 
@@ -62,6 +62,8 @@ Do not set `META_APP_SECRET`, WhatsApp access tokens, or encryption keys as `NEX
 - The owner can disable the SmeOps connection. This stops SmeOps processing and outbound sends but does not revoke the Meta business integration token or remove the app from the WABA; remove the SmeOps app in Meta Business settings to revoke authorization fully.
 - Outbound messaging remains disabled until connection status becomes `active`.
 - The token expiry timestamp is stored when Meta returns `expires_in`; automatic token refresh/rotation is not yet implemented.
+- Authorization-code exchange is synchronous and bounded to an 8-second Meta request timeout. Subsequent verification, subscription and number registration run in the durable worker so the dashboard request does not wait on multiple Graph API calls.
+- The Next.js BFF route declares a 15-second maximum function duration. The selected frontend host/plan must support at least this duration for the authorization-code exchange.
 - Coexistence onboarding, multiple phone numbers per tenant, partner credit-line management and Meta template management are not implemented in this pilot.
 - Meta may require payment method attachment for a Tech Provider customer before messaging can be used. The dashboard must not report successful delivery until live tests confirm it.
 
