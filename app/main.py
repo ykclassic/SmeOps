@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.api.auth import router as auth_router
 from app.api.business import router as business_router
 from app.api.health import router as health_router
+from app.api.ops import router as ops_router
 from app.api.retail import router as retail_router
 from app.api.whatsapp import router as whatsapp_router
 from app.core.config import get_settings
@@ -49,6 +50,7 @@ async def add_security_headers(request, call_next):
 
 
 app.include_router(health_router)
+app.include_router(ops_router)
 app.include_router(auth_router)
 app.include_router(business_router)
 app.include_router(retail_router)

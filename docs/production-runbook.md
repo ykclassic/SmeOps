@@ -41,7 +41,7 @@ Do not run Alembic migrations independently from multiple service instances. The
 | `WHATSAPP_GRAPH_API_VERSION` | Yes | Pinned Meta Graph API version in `vNN.N` format. |
 | `META_APP_ID` | Yes | Numeric Meta app ID. |
 | `META_APP_SECRET` | Yes | Meta app secret; server-side only. |
-| `PLATFORM_ADMIN_KEY` | Optional | Needed only for the legacy internal provisioning endpoint. |
+| `PLATFORM_ADMIN_KEY` | Yes | High-entropy secret used for protected platform operations and the legacy internal provisioning endpoint. Configure the same value for API and worker services; never expose it to the dashboard. |
 | `OPENAI_API_KEY` | Optional | Enables model-assisted intent classification. |
 | `OPENAI_MODEL` | With API key | Model name selected for the SmeOps project. |
 
@@ -137,7 +137,7 @@ Configure external alerts for:
 - Database CPU, storage, connections and backup failures.
 - API 5xx rate, p95 latency and authentication 429 rate.
 
-The application persists worker heartbeats and job states, but alert delivery and queue dashboards must be configured in the hosting/monitoring environment.
+The application persists worker heartbeats and job states. `GET /internal/ops/summary` returns aggregate queue counts, oldest queued-job age, worker heartbeat states, outbound delivery states, webhook event states and tokens nearing expiry. Protect this endpoint with the `X-Platform-Admin-Key` header. It returns no customer message bodies, phone numbers or access tokens. Configure external alerts against these aggregate values; alert delivery still needs to be configured in the hosting/monitoring environment.
 
 ## 8. Backup and recovery acceptance
 

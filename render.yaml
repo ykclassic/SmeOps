@@ -70,6 +70,8 @@ services:
         sync: false
       - key: WHATSAPP_TOKEN_ENCRYPTION_KEY
         sync: false
+      - key: PLATFORM_ADMIN_KEY
+        sync: false
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
       - key: WHATSAPP_APP_SECRET
