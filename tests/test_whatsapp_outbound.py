@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
@@ -27,7 +27,7 @@ def whatsapp_settings(monkeypatch):
     get_settings.cache_clear()
 
 
-async def create_connection() -> tuple[Tenant, uuid4]:
+async def create_connection() -> tuple[Tenant, UUID]:
     tenant = Tenant(
         id=uuid4(),
         name="Outbound Test Business",
