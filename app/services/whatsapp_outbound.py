@@ -162,6 +162,17 @@ async def enqueue_whatsapp_text(
         return duplicate
 
     session.add(
+        WhatsAppConversationMessage(
+            tenant_id=tenant_id,
+            conversation_id=conversation.id,
+            provider_message_id=f"outbound:{message.id}",
+            direction="outbound",
+            message_type="text",
+            body_encrypted=encrypt_whatsapp_secret(normalized_body),
+            delivery_status="queued",
+        )
+    )
+    session.add(
         AuditEvent(
             tenant_id=tenant_id,
             actor_user_id=actor_user_id,
