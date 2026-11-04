@@ -1,3 +1,4 @@
+from app.models.auth_rate_limit import AuthRateLimitBucket
 from app.models.business import Appointment, AuditEvent, BusinessHours, Customer, Service
 from app.models.jobs import BackgroundJob
 from app.models.retail import Order, OrderItem, Product
@@ -12,6 +13,7 @@ from app.models.whatsapp_outbound import WhatsAppOutboundMessage
 
 __all__ = [
     "Appointment",
+    "AuthRateLimitBucket",
     "AuditEvent",
     "BackgroundJob",
     "BusinessHours",
