@@ -11,7 +11,10 @@ from app.models import BackgroundJob, Tenant, WhatsAppOutboundMessage
 
 
 def test_authenticated_owner_can_queue_tenant_scoped_whatsapp_message(monkeypatch):
-    monkeypatch.setenv("WHATSAPP_TOKEN_ENCRYPTION_KEY", "c21lb3BzLWNpLXdoYXRzYXBwLWZlcm5ldC1rZXktMzI=")
+    monkeypatch.setenv(
+        "WHATSAPP_TOKEN_ENCRYPTION_KEY",
+        "c21lb3BzLWNpLXdoYXRzYXBwLWZlcm5ldC1rZXktMzI=",
+    )
     monkeypatch.setenv("PLATFORM_ADMIN_KEY", "test-platform-admin-key-long-enough")
     get_settings.cache_clear()
     slug = f"send-{uuid4().hex[:10]}"
