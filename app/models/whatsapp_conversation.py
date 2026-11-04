@@ -3,12 +3,12 @@ from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -24,7 +24,11 @@ class WhatsAppConversation(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "whatsapp_conversations"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_whatsapp_conversations_tenant_id_id"),
-        UniqueConstraint("tenant_id", "customer_phone_hash", name="uq_whatsapp_conversations_tenant_phone"),
+        UniqueConstraint(
+            "tenant_id",
+            "customer_phone_hash",
+            name="uq_whatsapp_conversations_tenant_phone",
+        ),
         CheckConstraint(
             "status IN ('active', 'human_required', 'closed')",
             name="whatsapp_conversation_status_valid",
@@ -44,7 +48,12 @@ class WhatsAppConversation(UUIDPrimaryKey, TimestampMixin, Base):
     status: Mapped[Literal["active", "human_required", "closed"]] = mapped_column(
         String(24), nullable=False, default="active", server_default=text("'active'")
     )
-    context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
+    context: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
     last_inbound_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -86,7 +95,10 @@ class WhatsAppConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):
     direction: Mapped[Literal["inbound", "outbound"]] = mapped_column(String(12), nullable=False)
     message_type: Mapped[str] = mapped_column(String(40), nullable=False)
     body_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
-    provider_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     delivery_status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="received", server_default=text("'received'")
     )
