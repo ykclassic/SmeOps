@@ -12,7 +12,8 @@ async def main() -> None:
     await run_forever(
         worker_id=worker_id,
         handlers={
-            "whatsapp.accept_inbound": accept_inbound_whatsapp_job,\n            "whatsapp.process_conversation": process_whatsapp_conversation_job,
+            "whatsapp.accept_inbound": accept_inbound_whatsapp_job,
+            "whatsapp.process_conversation": process_whatsapp_conversation_job,
             "whatsapp.send_text": send_outbound_whatsapp_job,
         },
     )
