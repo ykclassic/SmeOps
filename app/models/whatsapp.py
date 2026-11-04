@@ -41,7 +41,9 @@ class WhatsAppConnection(UUIDPrimaryKey, TimestampMixin, Base):
     )
     display_phone_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
     verified_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     two_step_verification_pin_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     onboarding_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
