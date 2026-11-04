@@ -13,7 +13,7 @@ from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob
 from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.main import app
-from app.models import BackgroundJob, WhatsAppConnection, WhatsAppWebhookEvent
+from app.models import (\n    BackgroundJob,\n    WhatsAppConnection,\n    WhatsAppConversation,\n    WhatsAppConversationMessage,\n    WhatsAppWebhookEvent,\n)
 
 
 def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> None:
@@ -187,7 +187,33 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
                 return event.status, job.status
 
         event_status, job_status = asyncio.run(inspect_processed_event())
-        assert event_status == "accepted"
+        assert event_status == "processed"
         assert job_status == "queued"
+
+        async def inspect_conversation():
+            async with AsyncSessionFactory() as session:
+                conversation_result = await session.execute(
+                    select(WhatsAppConversation).where(
+                        WhatsAppConversation.tenant_id == tenant_id
+                    )
+                )
+                conversation = conversation_result.scalar_one()
+                message_result = await session.execute(
+                    select(WhatsAppConversationMessage).where(
+                        WhatsAppConversationMessage.tenant_id == tenant_id
+                    )
+                )
+                message = message_result.scalar_one()
+                return conversation, message
+
+        conversation, inbound_message = asyncio.run(inspect_conversation())
+        assert conversation.status == "active"
+        assert conversation.customer_phone_hash != "2348012345678"
+        assert decrypt_whatsapp_secret(conversation.customer_phone_encrypted) == "2348012345678"
+        assert inbound_message.direction == "inbound"
+        assert inbound_message.message_type == "text"
+        assert inbound_message.body_encrypted is not None
+        assert "Hello SmeOps" not in inbound_message.body_encrypted
+        assert decrypt_whatsapp_secret(inbound_message.body_encrypted) == "Hello SmeOps"
     finally:
         get_settings.cache_clear()
