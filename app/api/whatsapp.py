@@ -6,19 +6,29 @@ from collections.abc import Iterator
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import DbSession, require_roles
 from app.core.config import get_settings
-from app.core.whatsapp import encrypt_whatsapp_secret
+from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
 from app.jobs.queue import enqueue_job
-from app.models import AuditEvent, Tenant, User, WhatsAppConnection, WhatsAppWebhookEvent
+from app.models import (
+    AuditEvent,
+    Tenant,
+    User,
+    WhatsAppConnection,
+    WhatsAppConversation,
+    WhatsAppConversationMessage,
+    WhatsAppWebhookEvent,
+)
 from app.schemas.whatsapp import (
     WhatsAppConnectionProvision,
     WhatsAppConnectionResponse,
+    WhatsAppConversationMessageResponse,
+    WhatsAppConversationResponse,
     WhatsAppOutboundMessageResponse,
     WhatsAppTextMessageRequest,
 )
@@ -337,6 +347,91 @@ async def provision_whatsapp_connection(
         status=connection.status,
     )
 
+
+
+@router.get(
+    "/whatsapp/conversations",
+    response_model=list[WhatsAppConversationResponse],
+)
+async def list_whatsapp_conversations(
+    session: DbSession,
+    user: ManagerOrOwner,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[WhatsAppConversationResponse]:
+    result = await session.execute(
+        select(WhatsAppConversation)
+        .where(WhatsAppConversation.tenant_id == user.tenant_id)
+        .order_by(
+            WhatsAppConversation.last_inbound_at.desc(),
+            WhatsAppConversation.id.desc(),
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    return [
+        WhatsAppConversationResponse(
+            id=conversation.id,
+            customer_phone=decrypt_whatsapp_secret(
+                conversation.customer_phone_encrypted
+            ),
+            status=conversation.status,
+            last_inbound_at=conversation.last_inbound_at,
+            is_opted_out=conversation.is_opted_out,
+            opted_out_at=conversation.opted_out_at,
+        )
+        for conversation in result.scalars().all()
+    ]
+
+
+@router.get(
+    "/whatsapp/conversations/{conversation_id}/messages",
+    response_model=list[WhatsAppConversationMessageResponse],
+)
+async def list_whatsapp_conversation_messages(
+    conversation_id: UUID,
+    session: DbSession,
+    user: ManagerOrOwner,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[WhatsAppConversationMessageResponse]:
+    conversation_result = await session.execute(
+        select(WhatsAppConversation.id).where(
+            WhatsAppConversation.id == conversation_id,
+            WhatsAppConversation.tenant_id == user.tenant_id,
+        )
+    )
+    if conversation_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    message_result = await session.execute(
+        select(WhatsAppConversationMessage)
+        .where(
+            WhatsAppConversationMessage.conversation_id == conversation_id,
+            WhatsAppConversationMessage.tenant_id == user.tenant_id,
+        )
+        .order_by(
+            WhatsAppConversationMessage.created_at.desc(),
+            WhatsAppConversationMessage.id.desc(),
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    return [
+        WhatsAppConversationMessageResponse(
+            id=message.id,
+            direction=message.direction,
+            message_type=message.message_type,
+            body=(
+                decrypt_whatsapp_secret(message.body_encrypted)
+                if message.body_encrypted is not None
+                else None
+            ),
+            delivery_status=message.delivery_status,
+            occurred_at=message.provider_timestamp or message.created_at,
+        )
+        for message in message_result.scalars().all()
+    ]
 
 
 @router.post(
