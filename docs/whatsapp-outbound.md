@@ -17,7 +17,7 @@ Meta message creation is an external write without a provider idempotency guaran
 
 - A definitive HTTP 4xx response is recorded as `failed`.
 - A timeout, transport failure, 5xx response or malformed success response is recorded as `unknown`.
-- If a worker restarts after marking a message `sending`, a subsequent attempt marks it `unknown` rather than sending again.
+- If a worker restarts after marking a message `sending`, the one recovery attempt marks it `unknown` rather than sending again.
 - `unknown` must be reconciled against provider status events or operational evidence. It must not be blindly retried.
 
 This deliberately favours avoiding duplicate customer messages over automatic recovery from an ambiguous network outcome.
