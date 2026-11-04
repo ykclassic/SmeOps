@@ -59,7 +59,11 @@ def main() -> int:
                 "password": password,
             },
         )
-        access_token = token_payload.get("access_token") if isinstance(token_payload, dict) else None
+        access_token = (
+            token_payload.get("access_token")
+            if isinstance(token_payload, dict)
+            else None
+        )
         if not isinstance(access_token, str) or not access_token:
             raise SystemExit("Test account login did not return an access token.")
 
@@ -131,7 +135,9 @@ def main() -> int:
                 and normalize_phone(str(item.get("customer_phone", ""))) == customer_phone
             ]
             if len(matching_conversations) != 1:
-                raise SystemExit("Expected exactly one WhatsApp conversation for the test customer.")
+                raise SystemExit(
+                    "Expected exactly one WhatsApp conversation for the test customer."
+                )
 
             conversation_id = matching_conversations[0]["id"]
             messages = request_json(
@@ -148,14 +154,24 @@ def main() -> int:
                 for item in messages
             )
             if not confirmation_found:
-                raise SystemExit("The WhatsApp thread does not contain the booking confirmation reply.")
+                raise SystemExit(
+                    "The WhatsApp thread does not contain the booking confirmation reply."
+                )
 
     print("SmeOps live API smoke checks passed.")
-    print("Authentication, database readiness, worker heartbeat, services, hours, WhatsApp connection and tenant APIs verified.")
+    print(
+        "Authentication, database readiness, worker heartbeat, services, hours, "
+        "WhatsApp connection and tenant APIs verified."
+    )
     if verify_booking:
-        print("Confirmed customer appointment and outbound conversation confirmation verified.")
+        print(
+            "Confirmed customer appointment and outbound conversation confirmation verified."
+        )
     else:
-        print("Customer booking assertion skipped; set E2E_VERIFY_CUSTOMER_BOOKING=true after the test customer completes a real WhatsApp booking.")
+        print(
+            "Customer booking assertion skipped; set E2E_VERIFY_CUSTOMER_BOOKING=true "
+            "after the test customer completes a real WhatsApp booking."
+        )
     return 0
 
 
