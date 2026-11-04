@@ -24,8 +24,18 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=24), server_default="active", nullable=False),
         sa.Column("context", sa.JSON(), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("last_inbound_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.CheckConstraint(
             "status IN ('active', 'human_required', 'closed')",
             name="ck_whatsapp_conversations_whatsapp_conversation_status_valid",
@@ -60,7 +70,12 @@ def upgrade() -> None:
         sa.Column("message_type", sa.String(length=40), nullable=False),
         sa.Column("body_encrypted", sa.Text(), nullable=True),
         sa.Column("provider_timestamp", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("delivery_status", sa.String(length=16), server_default="received", nullable=False),
+        sa.Column(
+            "delivery_status",
+            sa.String(length=16),
+            server_default="received",
+            nullable=False,
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint(
