@@ -40,7 +40,7 @@ test("owner can sign in and use the dashboard without exposing the session token
   await expect(page.getByRole("heading", { name: "Appointments" })).toBeVisible();
 
   if (customerPhone && expectedServiceName) {
-    const phoneSuffix = customerPhone.replace(/\\D/g, "").slice(-10);
+    const phoneSuffix = customerPhone.replace(/\D/g, "").slice(-10);
     const bookingRow = page.getByRole("row").filter({ hasText: phoneSuffix });
     await expect(bookingRow).toContainText(expectedServiceName);
     await expect(bookingRow).toContainText("confirmed");
@@ -50,7 +50,7 @@ test("owner can sign in and use the dashboard without exposing the session token
   await expect(page.getByRole("heading", { name: "WhatsApp inbox" })).toBeVisible();
 
   if (customerPhone && expectedServiceName) {
-    const phoneSuffix = customerPhone.replace(/\\D/g, "").slice(-10);
+    const phoneSuffix = customerPhone.replace(/\D/g, "").slice(-10);
     const customerThread = page.getByRole("button").filter({ hasText: phoneSuffix });
     await expect(customerThread).toHaveCount(1);
     await customerThread.click();
