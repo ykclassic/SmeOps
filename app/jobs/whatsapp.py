@@ -32,7 +32,9 @@ def _provider_timestamp(value: object) -> datetime | None:
         return None
 
 
-async def _process_inbound_message(\n    session, *, tenant_id: UUID, payload: dict\n) -> tuple[UUID, UUID] | None:
+async def _process_inbound_message(
+    session, *, tenant_id: UUID, payload: dict
+) -> tuple[UUID, UUID] | None:
     message = payload.get("message")
     if not isinstance(message, dict):
         raise ValueError("Invalid inbound WhatsApp message payload")
@@ -56,7 +58,7 @@ async def _process_inbound_message(\n    session, *, tenant_id: UUID, payload: d
         )
     )
     if existing_message_result.scalar_one_or_none() is not None:
-        return
+        return None
 
     safe_message_type = (
         message_type if isinstance(message_type, str) and 1 <= len(message_type) <= 40
@@ -138,7 +140,8 @@ async def _process_inbound_message(\n    session, *, tenant_id: UUID, payload: d
             await session.flush()
     except IntegrityError:
         # Another worker may have won the provider-message uniqueness race.
-        return
+        return None
+    return conversation.id, conversation_message.id
 
 
 async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
