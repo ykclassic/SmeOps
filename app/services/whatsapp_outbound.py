@@ -108,7 +108,7 @@ async def enqueue_whatsapp_text(
         idempotency_key=(
             f"wa:outbound:{hashlib.sha256(idempotency_key.encode()).hexdigest()}"
         ),
-        max_attempts=1,
+        max_attempts=2,
     )
     await session.commit()
     return message
