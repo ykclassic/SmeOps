@@ -41,11 +41,11 @@ async def operations_summary(
 
     now = datetime.now(UTC)
     queued_result = await session.execute(
-        select(func.count(BackgroundJob.id), func.min(BackgroundJob.created_at)).where(
+        select(func.min(BackgroundJob.created_at)).where(
             BackgroundJob.status == "queued"
         )
     )
-    queued_count, oldest_queued_at = queued_result.one()
+    oldest_queued_at = queued_result.scalar_one()
     status_result = await session.execute(
         select(BackgroundJob.status, func.count(BackgroundJob.id)).group_by(
             BackgroundJob.status
