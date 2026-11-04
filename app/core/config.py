@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     whatsapp_token_encryption_key: SecretStr | None = None
     platform_admin_key: SecretStr | None = None
     whatsapp_graph_api_version: str | None = None
+    meta_app_id: str | None = None
+    meta_app_secret: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     openai_model: str | None = None
 
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
         "whatsapp_token_encryption_key",
         "platform_admin_key",
         "openai_api_key",
+        "meta_app_secret",
         mode="before",
     )
     @classmethod
@@ -68,6 +71,15 @@ class Settings(BaseSettings):
             raise ValueError("WHATSAPP_GRAPH_API_VERSION must use the form vNN.N")
         return value
 
+    @field_validator("meta_app_id")
+    @classmethod
+    def validate_meta_app_id(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        if not re.fullmatch(r"\d{5,80}", value.strip()):
+            raise ValueError("META_APP_ID must be a numeric Meta app ID")
+        return value.strip()
+
     @field_validator("openai_model")
     @classmethod
     def validate_openai_model(cls, value: str | None) -> str | None:
@@ -83,6 +95,10 @@ class Settings(BaseSettings):
             raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
         if self.openai_api_key is not None and self.openai_model is None:
             raise ValueError("OPENAI_MODEL is required when OPENAI_API_KEY is configured")
+        if (self.meta_app_id is None) != (self.meta_app_secret is None):
+            raise ValueError("META_APP_ID and META_APP_SECRET must be configured together")
+        if self.meta_app_id is not None and self.whatsapp_graph_api_version is None:
+            raise ValueError("WHATSAPP_GRAPH_API_VERSION is required for Meta onboarding")
         return self
 
 
