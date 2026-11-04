@@ -767,6 +767,23 @@ export default function HomePage() {
                       <p className="muted">Your Meta authorization is saved. Complete the remaining registration step.</p>
                       {connection.onboarding_error_code && <p className="form-error">Meta error reference: {connection.onboarding_error_code}</p>}
                       <button className="button button-primary" onClick={retryWhatsAppConnection} disabled={busy}>Retry connection</button>
+                      <label>Use a different six-digit PIN to restart onboarding
+                        <input
+                          inputMode="numeric"
+                          pattern="[0-9]{6}"
+                          maxLength={6}
+                          type="password"
+                          autoComplete="off"
+                          value={signupPin}
+                          onChange={(event) => {
+                            const nextPin = event.target.value.replace(/\D/g, "").slice(0, 6);
+                            signupPinRef.current = nextPin;
+                            setSignupPin(nextPin);
+                          }}
+                          placeholder="New 6-digit PIN"
+                        />
+                      </label>
+                      <button className="button button-quiet" onClick={launchEmbeddedSignup} disabled={busy || !metaSdkReady || signupPin.length !== 6}>Restart Embedded Signup</button>
                     </div>
                   ) : (
                     <div className="stack-form embedded-form">
