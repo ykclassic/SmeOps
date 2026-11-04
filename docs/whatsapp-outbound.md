@@ -44,7 +44,7 @@ Do not put real credentials in source control or test fixtures. Inject productio
 
 Verified inbound webhook events of type `message.received` are now processed into a tenant-scoped conversation inbox.
 
-- Conversation lookup uses an HMAC-SHA256 of the normalized sender number with the application secret; the sender number itself is Fernet-encrypted.
+- Conversation lookup uses an HMAC-SHA256 of the normalized sender number with `APP_SECRET_KEY`; the sender number itself is Fernet-encrypted. Keep this key stable or perform a controlled contact-hash migration when rotating it, otherwise existing conversations will no longer match outbound recipient lookups.
 - Provider message IDs are unique per tenant, so worker retries do not create duplicate message history.
 - Text message bodies are Fernet-encrypted. Non-text message types are retained as metadata without attempting to download or interpret media.
 - Provider timestamps are stored in UTC. Invalid or absent timestamps fall back to the worker receipt time for conversation ordering while the original timestamp remains null.
