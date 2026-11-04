@@ -1,17 +1,37 @@
 import hashlib
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
+from app.core.whatsapp import (
+    decrypt_whatsapp_secret,
+    encrypt_whatsapp_secret,
+    hash_whatsapp_contact,
+)
 from app.jobs.queue import enqueue_job
-from app.models import AuditEvent, WhatsAppConnection, WhatsAppOutboundMessage
+from app.models import (
+    AuditEvent,
+    WhatsAppConnection,
+    WhatsAppConversation,
+    WhatsAppOutboundMessage,
+)
+
+CUSTOMER_SERVICE_WINDOW = timedelta(hours=24)
 
 
 class OutboundIdempotencyConflict(ValueError):
     """An outbound idempotency key was reused for different content."""
+
+
+class OutboundPolicyViolation(ValueError):
+    """The requested message is not permitted by WhatsApp contact policy."""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def _matches_request(
@@ -24,6 +44,40 @@ def _matches_request(
         decrypt_whatsapp_secret(message.recipient_encrypted) == recipient
         and decrypt_whatsapp_secret(message.body_encrypted) == body
     )
+
+
+async def assert_outbound_policy(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    recipient: str,
+    now: datetime | None = None,
+) -> WhatsAppConversation:
+    current_time = now or datetime.now(UTC)
+    phone_hash = hash_whatsapp_contact(recipient)
+    result = await session.execute(
+        select(WhatsAppConversation).where(
+            WhatsAppConversation.tenant_id == tenant_id,
+            WhatsAppConversation.customer_phone_hash == phone_hash,
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    if conversation is None:
+        raise OutboundPolicyViolation(
+            "customer_service_window_closed",
+            "A customer-initiated WhatsApp conversation is required before sending text.",
+        )
+    if conversation.is_opted_out:
+        raise OutboundPolicyViolation(
+            "customer_opted_out",
+            "The customer has opted out of WhatsApp messages.",
+        )
+    if conversation.last_inbound_at <= current_time - CUSTOMER_SERVICE_WINDOW:
+        raise OutboundPolicyViolation(
+            "customer_service_window_closed",
+            "The 24-hour WhatsApp customer-service window has expired.",
+        )
+    return conversation
 
 
 async def enqueue_whatsapp_text(
@@ -61,6 +115,12 @@ async def enqueue_whatsapp_text(
                 "Idempotency key was used with different message content"
             )
         return existing
+
+    await assert_outbound_policy(
+        session,
+        tenant_id=tenant_id,
+        recipient=normalized_recipient,
+    )
 
     connection_result = await session.execute(
         select(WhatsAppConnection).where(
