@@ -10,7 +10,7 @@ Before real customer onboarding is enabled, the SmeOps operator must:
 2. Be approved as a Meta Tech Provider or Solution Partner for the intended onboarding model.
 3. Add WhatsApp Cloud API to the Meta app and enable Facebook Login for Business.
 4. Create an Embedded Signup v4 configuration in Meta App Dashboard, using WhatsApp Embedded Signup and the system-user token option.
-5. Request and receive Advanced Access/App Review for the required WhatsApp permissions, including `whatsapp_business_management` and `whatsapp_business_messaging`.
+5. Request and receive Advanced Access/App Review for the required WhatsApp permissions, including `whatsapp_business_management` and `whatsapp_business_messaging`, and `business_management` where required by the selected Tech Provider flow.
 6. Configure the SmeOps production HTTPS domain in the Facebook Login for Business allowed domains and OAuth redirect settings.
 7. Configure the Meta webhook callback to the SmeOps webhook URL and subscribe to the WhatsApp account and message events required by the application.
 8. Complete Meta's business verification, app review and partner requirements before onboarding external customer businesses.
