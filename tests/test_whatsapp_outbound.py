@@ -97,7 +97,7 @@ async def test_outbound_message_is_encrypted_and_idempotent():
     assert message.body_encrypted != "Your appointment is confirmed."
     assert decrypt_whatsapp_secret(message.recipient_encrypted) == "2348012345678"
     assert decrypt_whatsapp_secret(message.body_encrypted) == "Your appointment is confirmed."
-    assert job.max_attempts == 1
+    assert job.max_attempts == 2
     assert job.status == "queued"
 
     async with AsyncSessionFactory() as session:
