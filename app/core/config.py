@@ -44,6 +44,15 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("database_url")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
     @field_validator("app_secret_key")
     @classmethod
     def validate_secret_key(cls, value: SecretStr) -> SecretStr:
@@ -91,8 +100,21 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def reject_local_secret_in_production(self) -> "Settings":
-        if self.app_env == "production" and self.app_secret_key.get_secret_value() == LOCAL_SECRET:
-            raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
+        if self.app_env == "production":
+            if self.app_secret_key.get_secret_value() == LOCAL_SECRET:
+                raise ValueError("APP_SECRET_KEY must be explicitly configured in production")
+            if "localhost" in self.database_url or "127.0.0.1" in self.database_url:
+                raise ValueError("DATABASE_URL must point to a managed production database")
+            if self.whatsapp_token_encryption_key is None:
+                raise ValueError("WHATSAPP_TOKEN_ENCRYPTION_KEY is required in production")
+            if self.whatsapp_verify_token is None or self.whatsapp_app_secret is None:
+                raise ValueError("WhatsApp webhook verification secrets are required in production")
+            if (
+                self.meta_app_id is None
+                or self.meta_app_secret is None
+                or self.whatsapp_graph_api_version is None
+            ):
+                raise ValueError("Meta Embedded Signup credentials are required in production")
         if self.openai_api_key is not None and self.openai_model is None:
             raise ValueError("OPENAI_MODEL is required when OPENAI_API_KEY is configured")
         if (self.meta_app_id is None) != (self.meta_app_secret is None):
