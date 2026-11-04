@@ -1,14 +1,25 @@
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
+from app.core.whatsapp import (
+    decrypt_whatsapp_secret,
+    encrypt_whatsapp_secret,
+    hash_whatsapp_contact,
+)
 from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob
 from app.jobs.whatsapp_outbound import send_outbound_whatsapp_job
-from app.models import BackgroundJob, Tenant, WhatsAppConnection, WhatsAppOutboundMessage
+from app.models import (
+    BackgroundJob,
+    Tenant,
+    WhatsAppConnection,
+    WhatsAppConversation,
+    WhatsAppOutboundMessage,
+)
 from app.services.whatsapp_outbound import (
     OutboundIdempotencyConflict,
     enqueue_whatsapp_text,
@@ -35,6 +46,7 @@ async def create_connection() -> tuple[Tenant, UUID]:
         business_timezone="Africa/Lagos",
         status="active",
     )
+    customer_phone = "2348012345678"
     connection = WhatsAppConnection(
         tenant_id=tenant.id,
         phone_number_id=f"{uuid4().int % 10**11:011d}",
@@ -42,8 +54,16 @@ async def create_connection() -> tuple[Tenant, UUID]:
         access_token_encrypted=encrypt_whatsapp_secret("test-meta-access-token"),
         status="active",
     )
+    conversation = WhatsAppConversation(
+        tenant_id=tenant.id,
+        customer_phone_hash=hash_whatsapp_contact(customer_phone),
+        customer_phone_encrypted=encrypt_whatsapp_secret(customer_phone),
+        status="active",
+        context={},
+        last_inbound_at=datetime.now(UTC),
+    )
     async with AsyncSessionFactory() as session:
-        session.add_all([tenant, connection])
+        session.add_all([tenant, connection, conversation])
         await session.commit()
     return tenant, connection.id
 
@@ -188,6 +208,123 @@ async def test_recovery_of_stale_sending_message_never_calls_provider(monkeypatc
     assert persisted is not None
     assert persisted.status == "unknown"
     assert persisted.last_error_code == "previous_send_outcome_unknown"
+
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        await session.delete(persisted_tenant)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_expired_customer_service_window_blocks_enqueue():
+    tenant, _connection_id = await create_connection()
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(WhatsAppConversation).where(
+                WhatsAppConversation.tenant_id == tenant.id
+            )
+        )
+        conversation = result.scalar_one()
+        conversation.last_inbound_at = datetime.now(UTC) - timedelta(hours=24)
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        from app.services.whatsapp_outbound import OutboundPolicyViolation
+
+        with pytest.raises(OutboundPolicyViolation) as exc_info:
+            await enqueue_whatsapp_text(
+                session,
+                tenant_id=tenant.id,
+                recipient="2348012345678",
+                body="Outside the service window",
+                idempotency_key=f"test:{uuid4()}",
+            )
+        assert exc_info.value.error_code == "customer_service_window_closed"
+
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        await session.delete(persisted_tenant)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_opted_out_customer_cannot_be_messaged():
+    tenant, _connection_id = await create_connection()
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(WhatsAppConversation).where(
+                WhatsAppConversation.tenant_id == tenant.id
+            )
+        )
+        conversation = result.scalar_one()
+        conversation.is_opted_out = True
+        conversation.opted_out_at = datetime.now(UTC)
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        from app.services.whatsapp_outbound import OutboundPolicyViolation
+
+        with pytest.raises(OutboundPolicyViolation) as exc_info:
+            await enqueue_whatsapp_text(
+                session,
+                tenant_id=tenant.id,
+                recipient="2348012345678",
+                body="Customer opted out",
+                idempotency_key=f"test:{uuid4()}",
+            )
+        assert exc_info.value.error_code == "customer_opted_out"
+
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        await session.delete(persisted_tenant)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_worker_rechecks_service_window_before_provider_call(monkeypatch):
+    tenant, _connection_id = await create_connection()
+    async with AsyncSessionFactory() as session:
+        message = await enqueue_whatsapp_text(
+            session,
+            tenant_id=tenant.id,
+            recipient="2348012345678",
+            body="Window may expire while queued",
+            idempotency_key=f"test:{uuid4()}",
+        )
+        message_id = message.id
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(WhatsAppConversation).where(
+                WhatsAppConversation.tenant_id == tenant.id
+            )
+        )
+        conversation = result.scalar_one()
+        conversation.last_inbound_at = datetime.now(UTC) - timedelta(hours=25)
+        await session.commit()
+
+    async def must_not_send(**_kwargs):
+        raise AssertionError("expired customer-service window must block provider send")
+
+    monkeypatch.setattr(
+        "app.jobs.whatsapp_outbound.send_text_message",
+        must_not_send,
+    )
+    job = ClaimedJob(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        job_type="whatsapp.send_text",
+        payload={"message_id": str(message_id)},
+        attempts=1,
+        max_attempts=2,
+    )
+    await send_outbound_whatsapp_job(job)
+
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(WhatsAppOutboundMessage, message_id)
+    assert persisted is not None
+    assert persisted.status == "failed"
+    assert persisted.last_error_code == "customer_service_window_closed"
 
     async with AsyncSessionFactory() as session:
         persisted_tenant = await session.get(Tenant, tenant.id)
