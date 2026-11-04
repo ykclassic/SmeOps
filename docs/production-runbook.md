@@ -97,7 +97,7 @@ Configure these GitHub Actions repository or environment variables/secrets:
 - Variables: `E2E_BASE_URL`, `E2E_DASHBOARD_URL`, `E2E_EXPECTED_SERVICE_NAME`.
 - Secrets: `E2E_TEST_TENANT_SLUG`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`, `E2E_CUSTOMER_PHONE`.
 
-After deploying the exact commit and configuring those values, run the **Live acceptance tests** workflow manually from GitHub Actions. Set `verify_customer_booking=true` only after the test customer has completed the real WhatsApp booking conversation. The dashboard job verifies the HttpOnly session and core screens; the backend job checks API readiness, worker heartbeat, tenant data, WhatsApp connection and (when selected) the confirmed appointment and outbound confirmation message. The workflow does not send a customer WhatsApp message on its own.
+After deploying the exact commit and configuring those values, run the **Live acceptance tests** workflow manually from GitHub Actions. Set `verify_customer_booking=true` only after the test customer has completed the real WhatsApp booking conversation. The dashboard job verifies the HttpOnly session and core screens. When `E2E_CUSTOMER_PHONE` and `E2E_EXPECTED_SERVICE_NAME` are configured, it also verifies that the confirmed booking appears in the appointments table and that the outbound confirmation is visible in the WhatsApp thread. The backend job checks API readiness, worker heartbeat, tenant data, WhatsApp connection and (when selected) the confirmed appointment and outbound confirmation message. The workflow does not send a customer WhatsApp message on its own.
 
 ## 6. Customer journey acceptance
 
