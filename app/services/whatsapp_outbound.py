@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.whatsapp import encrypt_whatsapp_secret
+from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
 from app.jobs.queue import enqueue_job
 from app.models import WhatsAppConnection, WhatsAppOutboundMessage
 
@@ -27,6 +27,8 @@ async def enqueue_whatsapp_text(
     normalized_body = body.strip()
     if not normalized_body or len(normalized_body) > 4096:
         raise ValueError("message body must contain 1 to 4096 characters")
+    if not 1 <= len(idempotency_key) <= 160:
+        raise ValueError("idempotency_key must contain 1 to 160 characters")
 
     existing_result = await session.execute(
         select(WhatsAppOutboundMessage).where(
@@ -36,9 +38,9 @@ async def enqueue_whatsapp_text(
     )
     existing = existing_result.scalar_one_or_none()
     if existing is not None:
-        from app.core.whatsapp import decrypt_whatsapp_secret
-
-        same_recipient = decrypt_whatsapp_secret(existing.recipient_encrypted) == normalized_recipient
+        same_recipient = (
+            decrypt_whatsapp_secret(existing.recipient_encrypted) == normalized_recipient
+        )
         same_body = decrypt_whatsapp_secret(existing.body_encrypted) == normalized_body
         if not (same_recipient and same_body):
             raise OutboundIdempotencyConflict(
@@ -70,7 +72,9 @@ async def enqueue_whatsapp_text(
         tenant_id=tenant_id,
         job_type="whatsapp.send_text",
         payload={"message_id": str(message.id)},
-        idempotency_key=f"wa:outbound:{hashlib.sha256(idempotency_key.encode()).hexdigest()}",
+        idempotency_key=(
+            f"wa:outbound:{hashlib.sha256(idempotency_key.encode()).hexdigest()}"
+        ),
         max_attempts=1,
     )
     await session.commit()
