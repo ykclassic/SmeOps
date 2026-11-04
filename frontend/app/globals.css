@@ -266,3 +266,5 @@ td strong { display: block; color: var(--ink); font-size: 11px; }
 
 .signup-status { margin: 12px 0 0; color: #708077; font-size: 10px; line-height: 1.6; }
 .embedded-form { max-width: 420px; padding: 14px 0 0; }
+
+.disconnect-button { grid-column: 1 / -1; justify-self: start; }
