@@ -24,6 +24,7 @@ from app.integrations.meta_whatsapp import (
 from app.jobs.queue import enqueue_job
 from app.models import (
     AuditEvent,
+    BackgroundJob,
     Tenant,
     User,
     WhatsAppConnection,
@@ -40,7 +41,6 @@ from app.schemas.whatsapp import (
     WhatsAppOutboundMessageResponse,
     WhatsAppTextMessageRequest,
 )
-from app.services.whatsapp_onboarding import complete_pending_whatsapp_connection
 from app.services.whatsapp_outbound import (
     OutboundIdempotencyConflict,
     OutboundPolicyViolation,
@@ -362,6 +362,7 @@ async def provision_whatsapp_connection(
 @router.post(
     "/whatsapp/embedded-signup",
     response_model=WhatsAppConnectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def complete_embedded_signup(
     request: WhatsAppEmbeddedSignupRequest,
@@ -505,21 +506,18 @@ async def complete_embedded_signup(
             detail="This WhatsApp number is already connected to another workspace",
         ) from exc
 
-    try:
-        connection = await complete_pending_whatsapp_connection(
-            session,
-            connection=connection,
-            actor_user_id=user.id,
-            api_version=settings.whatsapp_graph_api_version,
-        )
-    except MetaGraphAPIError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=(
-                "Meta accepted the authorization code but onboarding is incomplete. "
-                "Use Retry connection to finish setup."
-            ),
-        ) from exc
+    code_fingerprint = hashlib.sha256(
+        request.code.get_secret_value().encode()
+    ).hexdigest()
+    await enqueue_job(
+        session,
+        tenant_id=user.tenant_id,
+        job_type="whatsapp.complete_signup",
+        payload={"connection_id": str(connection.id)},
+        idempotency_key=f"wa:onboarding:{connection.id}:{code_fingerprint}",
+        max_attempts=3,
+    )
+    await session.commit()
 
     return WhatsAppConnectionResponse(
         tenant_id=connection.tenant_id,
@@ -580,17 +578,12 @@ async def disable_whatsapp_connection(
 @router.post(
     "/whatsapp/connection/complete",
     response_model=WhatsAppConnectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def retry_pending_whatsapp_connection(
     session: DbSession,
     user: OwnerOnly,
 ) -> WhatsAppConnectionResponse:
-    settings = get_settings()
-    if settings.whatsapp_graph_api_version is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="WhatsApp Graph API version is not configured",
-        )
     result = await session.execute(
         select(WhatsAppConnection)
         .where(
@@ -605,18 +598,36 @@ async def retry_pending_whatsapp_connection(
             status_code=status.HTTP_409_CONFLICT,
             detail="There is no pending WhatsApp connection to complete",
         )
-    try:
-        connection = await complete_pending_whatsapp_connection(
-            session,
-            connection=connection,
-            actor_user_id=user.id,
-            api_version=settings.whatsapp_graph_api_version,
+
+    active_job_result = await session.execute(
+        select(BackgroundJob.id)
+        .where(
+            BackgroundJob.tenant_id == user.tenant_id,
+            BackgroundJob.job_type == "whatsapp.complete_signup",
+            BackgroundJob.status.in_(["queued", "running"]),
+            BackgroundJob.idempotency_key.like(
+                f"wa:onboarding%:{connection.id}:%"
+            ),
         )
-    except MetaGraphAPIError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="WhatsApp onboarding is still incomplete. Check configuration and retry.",
-        ) from exc
+        .limit(1)
+    )
+    if active_job_result.scalar_one_or_none() is None:
+        updated_at = connection.updated_at.isoformat()
+        retry_fingerprint = hashlib.sha256(
+            f"{connection.id}:{updated_at}".encode()
+        ).hexdigest()
+        await enqueue_job(
+            session,
+            tenant_id=user.tenant_id,
+            job_type="whatsapp.complete_signup",
+            payload={"connection_id": str(connection.id)},
+            idempotency_key=(
+                f"wa:onboarding-retry:{connection.id}:{retry_fingerprint}"
+            ),
+            max_attempts=3,
+        )
+        await session.commit()
+
     return WhatsAppConnectionResponse(
         tenant_id=connection.tenant_id,
         phone_number_id=connection.phone_number_id,
