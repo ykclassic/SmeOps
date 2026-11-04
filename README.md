@@ -91,7 +91,7 @@ Requirements: Docker Compose, Python 3.12+, Node.js 22+.
 - `GET/PUT /business-hours`
 - `GET/POST /appointments`, `POST /appointments/{id}/cancel`
 - `GET /whatsapp/connection`
-- `POST /whatsapp/embedded-signup`, `POST /whatsapp/connection/complete`
+- `POST /whatsapp/embedded-signup`, `POST /whatsapp/connection/complete`, `POST /whatsapp/connection/disconnect`
 - `GET /whatsapp/conversations`
 - `GET /whatsapp/conversations/{id}/messages`
 - `POST /whatsapp/conversations/{id}/resolve`
@@ -155,6 +155,7 @@ Deploy the API and run migrations before starting the worker. Configure the fron
 - Worker heartbeats and health checks exist, but alert delivery, dashboards for dead-letter queues and queue-age SLOs still need production configuration.
 - Automated backup scheduling, point-in-time recovery validation, restore drills, retention/deletion workflows, load tests and independent security review are not evidenced yet.
 - No live Meta message delivery, public deployment, backup restore or production acceptance is claimed.
+- The manual `Live acceptance tests` GitHub Actions workflow is available for the deployed dashboard/API. It uses GitHub secrets for the test owner account and can verify a completed real WhatsApp booking after the test customer has sent the messages.
 
 ## Engineering rules
 
