@@ -135,7 +135,7 @@ async def test_unknown_provider_outcome_is_not_retried(monkeypatch):
         job_type="whatsapp.send_text",
         payload={"message_id": str(message_id)},
         attempts=1,
-        max_attempts=1,
+        max_attempts=2,
     )
     await send_outbound_whatsapp_job(job)
 
