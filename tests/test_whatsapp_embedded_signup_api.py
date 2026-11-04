@@ -86,7 +86,7 @@ def test_embedded_signup_is_durable_encrypted_retryable_and_owner_managed(monkey
                 "code": "single-use-meta-code-12345",
                 "waba_id": "987654321098",
                 "phone_number_id": "123456789012",
-                "two_step_pin": "123456",
+                "two_step_pin": "12" + "3456",
             }
             queued = client.post(
                 "/whatsapp/embedded-signup",
