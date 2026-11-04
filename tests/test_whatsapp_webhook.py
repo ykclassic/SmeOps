@@ -13,7 +13,7 @@ from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob
 from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.main import app
-from app.models import (\n    BackgroundJob,\n    WhatsAppConnection,\n    WhatsAppConversation,\n    WhatsAppConversationMessage,\n    WhatsAppWebhookEvent,\n)
+from app.models import BackgroundJob, WhatsAppConnection, WhatsAppConversation, WhatsAppConversationMessage, WhatsAppWebhookEvent
 
 
 def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> None:
