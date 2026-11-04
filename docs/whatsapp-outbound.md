@@ -35,5 +35,6 @@ Do not put real credentials in source control or test fixtures. Inject productio
 - The send endpoint is intended for authenticated owner/manager operational use and controlled integration testing; customer conversation orchestration and AI-generated replies are not implemented.
 - Inbound customer messages are still persisted and acknowledged by the worker; conversation orchestration and AI replies are not implemented.
 - Meta Embedded Signup, token refresh, connection health checks, templates, media messages, opt-out management and a tenant-facing message history UI remain future work.
-- Delivery status webhooks can arrive before the sender commits its provider message ID. Such events remain retryable and require the worker retry policy to complete correlation.
+- Delivery status webhooks can arrive before the sender commits its provider message ID. The event job retries with bounded backoff and then dead-letters; dead-letter reconciliation is still an operational follow-up.
+- The authenticated send route does not yet enforce the WhatsApp 24-hour customer-service window, approved templates or customer opt-out preferences. Use it only for controlled testing with opted-in recipients and an eligible active conversation. Do not use it for unrestricted production messaging.
 - This increment has automated adapter and database tests, but no live Meta account or real phone-number delivery verification is claimed.
