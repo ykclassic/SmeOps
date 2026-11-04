@@ -92,6 +92,13 @@ Recommended E2E variables:
 
 The test owner account must belong to a dedicated non-production or isolated test tenant. Never use a real customer's account or phone number for automated acceptance.
 
+Configure these GitHub Actions repository or environment variables/secrets:
+
+- Variables: `E2E_BASE_URL`, `E2E_DASHBOARD_URL`, `E2E_EXPECTED_SERVICE_NAME`.
+- Secrets: `E2E_TEST_TENANT_SLUG`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`, `E2E_CUSTOMER_PHONE`.
+
+After deploying the exact commit and configuring those values, run the **Live acceptance tests** workflow manually from GitHub Actions. Set `verify_customer_booking=true` only after the test customer has completed the real WhatsApp booking conversation. The dashboard job verifies the HttpOnly session and core screens; the backend job checks API readiness, worker heartbeat, tenant data, WhatsApp connection and (when selected) the confirmed appointment and outbound confirmation message. The workflow does not send a customer WhatsApp message on its own.
+
 ## 6. Customer journey acceptance
 
 Run the following in order:
