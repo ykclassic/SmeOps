@@ -74,11 +74,21 @@ async def run_forever(
     worker_id: str,
     handlers: Mapping[str, JobHandler],
     poll_interval_seconds: float = 1.0,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
     if poll_interval_seconds <= 0:
         raise ValueError("poll_interval_seconds must be positive")
 
-    while True:
+    while stop_event is None or not stop_event.is_set():
         did_work = await run_once(worker_id=worker_id, handlers=handlers)
         if not did_work:
-            await asyncio.sleep(poll_interval_seconds)
+            if stop_event is None:
+                await asyncio.sleep(poll_interval_seconds)
+            else:
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(),
+                        timeout=poll_interval_seconds,
+                    )
+                except TimeoutError:
+                    pass
