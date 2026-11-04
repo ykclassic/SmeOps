@@ -17,8 +17,6 @@ from app.main import app
 from app.models import (
     Appointment,
     BackgroundJob,
-    BusinessHours,
-    Service,
     Tenant,
     WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
@@ -188,7 +186,8 @@ def test_complete_salon_booking_conversation(monkeypatch):
             assert len(outbound) == 6
             assert len(history) == 6
             assert any(
-                "appointment is confirmed" in decrypt_whatsapp_secret(item.body_encrypted).casefold()
+                "appointment is confirmed"
+                in decrypt_whatsapp_secret(item.body_encrypted).casefold()
                 for item in history
             )
 
