@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.whatsapp import decrypt_whatsapp_secret
 from app.jobs.queue import ClaimedJob
-from app.models import (
+from app.integrations.conversation_ai import (\n    ConversationAIUnavailable,\n    classify_inbound_intent,\n)\nfrom app.models import (
     Service,
     Tenant,
     WhatsAppConversation,
@@ -133,8 +133,21 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
         timezone = ZoneInfo(tenant.business_timezone)
         customer_phone = decrypt_whatsapp_secret(conversation.customer_phone_encrypted)
         reply: str
+        ai_intent = None
+        if not booking.get("step") and normalized not in START_WORDS:
+            try:
+                ai_intent = await classify_inbound_intent(body)
+            except ConversationAIUnavailable as exc:
+                logger.warning(
+                    "Conversation intent interpreter unavailable; using deterministic fallback",
+                    extra={"error_type": type(exc.__cause__).__name__ if exc.__cause__ else "unknown"},
+                )
 
-        if normalized in HUMAN_WORDS or any(
+        if (
+            normalized in HUMAN_WORDS
+            or (ai_intent is not None and ai_intent.confidence >= 0.7
+                and ai_intent.intent == "human_request")
+            or any(
             phrase in normalized for phrase in ("speak to a person", "real person", "human agent")
         ):
             conversation.status = "human_required"
@@ -279,8 +292,14 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
                         booking["step"] = "awaiting_service"
                 else:
                     reply = "Please reply YES to confirm this appointment or NO to start again."
-            elif normalized in START_WORDS or any(
-                word in normalized for word in ("book", "appointment", "hair", "salon")
+            elif (
+                normalized in START_WORDS
+                or any(word in normalized for word in ("book", "appointment", "hair", "salon"))
+                or (
+                    ai_intent is not None
+                    and ai_intent.confidence >= 0.7
+                    and ai_intent.intent == "booking_start"
+                )
             ):
                 _, reply = await _service_menu(session, job.tenant_id)
                 booking = {"step": "awaiting_service"}
