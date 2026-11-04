@@ -1,0 +1,96 @@
+name: Staging database migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging:
+        description: Confirm that this operation targets the SmeOps staging database
+        required: true
+        type: choice
+        options:
+          - "no"
+          - "yes"
+      database_name:
+        description: Type the expected staging database name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smeops-staging-database-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply and verify staging migrations
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    env:
+      APP_ENV: staging
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      EXPECTED_DATABASE_NAME: smeops
+      CONFIRMED_DATABASE_NAME: ${{ inputs.database_name }}
+      CONFIRM_STAGING: ${{ inputs.confirm_staging }}
+    steps:
+      - name: Require explicit staging confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_STAGING" != "yes" ]]; then
+            echo "::error::Staging migration was not explicitly confirmed."
+            exit 1
+          fi
+          if [[ "$CONFIRMED_DATABASE_NAME" != "$EXPECTED_DATABASE_NAME" ]]; then
+            echo "::error::Database-name confirmation did not match the expected staging database."
+            exit 1
+          fi
+          if [[ -z "${DATABASE_URL:-}" ]]; then
+            echo "::error::The DATABASE_URL secret is missing from the GitHub staging environment."
+            exit 1
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install application and migration dependencies
+        run: python -m pip install .
+
+      - name: Validate database target without printing credentials
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy.engine import make_url
+
+          raw_url = os.environ["DATABASE_URL"]
+          url = make_url(raw_url)
+          expected_name = os.environ["EXPECTED_DATABASE_NAME"]
+
+          if url.database != expected_name:
+              raise SystemExit("DATABASE_URL does not identify the expected staging database.")
+          if not url.host or url.host in {"localhost", "127.0.0.1", "::1"}:
+              raise SystemExit("DATABASE_URL must use the Render external PostgreSQL hostname.")
+          if url.drivername not in {"postgres", "postgresql", "postgresql+asyncpg"}:
+              raise SystemExit("DATABASE_URL must use a PostgreSQL connection URL.")
+
+          print("Database target preflight passed; credentials were not displayed.")
+          PY
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Verify migration head and schema drift
+        run: |
+          alembic current
+          alembic check
