@@ -18,6 +18,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
 
+OutboundStatus = Literal[
+    "queued", "sending", "sent", "delivered", "read", "failed", "unknown"
+]
+
 
 class WhatsAppOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "whatsapp_outbound_messages"
@@ -52,7 +56,7 @@ class WhatsAppOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     recipient_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     body_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
-    status: Mapped[Literal["queued", "sending", "sent", "delivered", "read", "failed", "unknown"]] = mapped_column(
+    status: Mapped[OutboundStatus] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")
     )
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
