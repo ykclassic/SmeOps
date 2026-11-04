@@ -130,8 +130,8 @@ async def run_forever(
         raise ValueError("heartbeat_interval_seconds must be at least 5")
 
     loop = asyncio.get_running_loop()
-    last_heartbeat = 0.0
     await _safe_worker_heartbeat(worker_id)
+    last_heartbeat = loop.time()
     while stop_event is None or not stop_event.is_set():
         if loop.time() - last_heartbeat >= heartbeat_interval_seconds:
             await _safe_worker_heartbeat(worker_id)
