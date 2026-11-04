@@ -149,3 +149,47 @@ async def test_unknown_provider_outcome_is_not_retried(monkeypatch):
         persisted_tenant = await session.get(Tenant, tenant.id)
         await session.delete(persisted_tenant)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_recovery_of_stale_sending_message_never_calls_provider(monkeypatch):
+    tenant, _connection_id = await create_connection()
+    async with AsyncSessionFactory() as session:
+        message = await enqueue_whatsapp_text(
+            session,
+            tenant_id=tenant.id,
+            recipient="2348012345678",
+            body="Potentially already sent",
+            idempotency_key=f"test:{uuid4()}",
+        )
+        message_id = message.id
+        message.status = "sending"
+        await session.commit()
+
+    async def must_not_send(**_kwargs):
+        raise AssertionError("stale sending message must not be sent again")
+
+    monkeypatch.setattr(
+        "app.jobs.whatsapp_outbound.send_text_message",
+        must_not_send,
+    )
+    job = ClaimedJob(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        job_type="whatsapp.send_text",
+        payload={"message_id": str(message_id)},
+        attempts=2,
+        max_attempts=2,
+    )
+    await send_outbound_whatsapp_job(job)
+
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(WhatsAppOutboundMessage, message_id)
+    assert persisted is not None
+    assert persisted.status == "unknown"
+    assert persisted.last_error_code == "previous_send_outcome_unknown"
+
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        await session.delete(persisted_tenant)
+        await session.commit()
