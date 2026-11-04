@@ -1,6 +1,6 @@
 import logging
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -197,6 +197,7 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
                             "service_name": selected.name,
                             "service_duration_minutes": selected.duration_minutes,
                             "service_price_minor": selected.price_minor,
+                            "booking_attempt_id": str(uuid4()),
                         }
                     )
                     reply = f"You selected {selected.name}. What name should I use for the booking?"
@@ -276,6 +277,7 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
                             customer_phone=f"+{customer_phone}",
                             starts_at=datetime.fromisoformat(booking["starts_at"]),
                             conversation_id=conversation.id,
+                            booking_attempt_id=UUID(booking["booking_attempt_id"]),
                         )
                     except (BookingConflict, ValueError):
                         booking = {}
