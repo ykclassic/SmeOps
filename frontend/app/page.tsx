@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type User = { id: string; tenant_id: string; email: string; role: string };
 type Service = {
@@ -52,6 +52,27 @@ type Connection = {
 } | null;
 
 type Tab = "overview" | "appointments" | "inbox" | "services" | "hours" | "whatsapp";
+
+type FacebookLoginResponse = {
+  authResponse?: { code?: string };
+  status?: string;
+};
+type EmbeddedSignupMessage = {
+  type?: string;
+  event?: string;
+  data?: { waba_id?: string; phone_number_id?: string; error_message?: string };
+};
+declare global {
+  interface Window {
+    FB?: {
+      init: (options: { appId: string; cookie: boolean; xfbml: boolean; version: string }) => void;
+      login: (
+        callback: (response: FacebookLoginResponse) => void,
+        options: Record<string, unknown>,
+      ) => void;
+    };
+  }
+}
 
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -120,6 +141,16 @@ export default function HomePage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [connection, setConnection] = useState<Connection>(null);
+  const [signupPin, setSignupPin] = useState("");
+  const signupPinRef = useRef("");
+  const signupPartsRef = useRef<{
+    code?: string;
+    waba_id?: string;
+    phone_number_id?: string;
+  }>({});
+  const signupSubmittingRef = useRef(false);
+  const [metaSdkReady, setMetaSdkReady] = useState(false);
+  const [signupStatus, setSignupStatus] = useState("");
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [serviceForm, setServiceForm] = useState({
@@ -132,6 +163,108 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const completeSignup = useCallback(async () => {
+    const signup = signupPartsRef.current;
+    if (
+      !signup.code ||
+      !signup.waba_id ||
+      !signup.phone_number_id ||
+      signupSubmittingRef.current
+    ) {
+      return;
+    }
+    if (!/^\d{6}$/.test(signupPinRef.current)) {
+      setError("Enter a six-digit WhatsApp two-step verification PIN before connecting.");
+      return;
+    }
+    signupSubmittingRef.current = true;
+    setBusy(true);
+    setError("");
+    setSignupStatus("Completing secure WhatsApp connection…");
+    try {
+      const result = await api<Connection>("whatsapp/embedded-signup", {
+        method: "POST",
+        body: JSON.stringify({
+          code: signup.code,
+          waba_id: signup.waba_id,
+          phone_number_id: signup.phone_number_id,
+          two_step_pin: signupPinRef.current,
+        }),
+      });
+      setConnection(result);
+      setSignupStatus("WhatsApp is connected and ready for inbound messages.");
+      setNotice("WhatsApp Business account connected.");
+    } catch (reason) {
+      const pending = await api<Connection>("whatsapp/connection").catch(() => null);
+      setConnection(pending);
+      setError(reason instanceof Error ? reason.message : "WhatsApp onboarding failed");
+      setSignupStatus(
+        pending?.status === "pending"
+          ? "Meta authorized the number. Complete the remaining registration step with Retry connection."
+          : "Connection was not completed. Restart Embedded Signup and try again.",
+      );
+    } finally {
+      signupSubmittingRef.current = false;
+      signupPartsRef.current = {};
+      setBusy(false);
+    }
+  }, []);
+
+  function launchEmbeddedSignup() {
+    const appId = process.env.NEXT_PUBLIC_META_APP_ID;
+    const configId = process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID;
+    const graphVersion = process.env.NEXT_PUBLIC_META_GRAPH_API_VERSION;
+    if (!appId || !configId || !graphVersion || !window.FB || !metaSdkReady) {
+      setError("Meta Embedded Signup is not configured. Check the frontend Meta environment variables.");
+      return;
+    }
+    if (!/^\d{6}$/.test(signupPin)) {
+      setError("Choose a six-digit WhatsApp two-step verification PIN first.");
+      return;
+    }
+    signupPartsRef.current = {};
+    setError("");
+    setSignupStatus("Waiting for you to complete Meta's secure signup window…");
+    const solutionId = process.env.NEXT_PUBLIC_META_SOLUTION_ID;
+    window.FB.login(
+      (response) => {
+        const code = response.authResponse?.code;
+        if (!code) {
+          setSignupStatus("Meta signup did not return an authorization code. Start again.");
+          return;
+        }
+        signupPartsRef.current = { ...signupPartsRef.current, code };
+        void completeSignup();
+      },
+      {
+        config_id: configId,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: { setup: solutionId ? { solutionID: solutionId } : {} },
+      },
+    );
+  }
+
+  async function retryWhatsAppConnection() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<Connection>("whatsapp/connection/complete", {
+        method: "POST",
+        body: "{}",
+      });
+      setConnection(result);
+      setSignupStatus("WhatsApp is connected and ready for inbound messages.");
+      setNotice("WhatsApp connection completed.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Connection retry failed");
+      const pending = await api<Connection>("whatsapp/connection").catch(() => null);
+      setConnection(pending);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const loadDashboard = useCallback(async () => {
     setError("");
@@ -173,6 +306,90 @@ export default function HomePage() {
       setMessages([]);
     }
   }, [activeConversation]);
+
+  useEffect(() => {
+    const appId = process.env.NEXT_PUBLIC_META_APP_ID;
+    const graphVersion = process.env.NEXT_PUBLIC_META_GRAPH_API_VERSION;
+    if (!appId || !graphVersion) return;
+
+    const initializeSdk = () => {
+      if (!window.FB) return;
+      window.FB.init({
+        appId,
+        cookie: true,
+        xfbml: false,
+        version: graphVersion,
+      });
+      setMetaSdkReady(true);
+    };
+
+    if (window.FB) {
+      initializeSdk();
+      return;
+    }
+
+    const existing = document.getElementById("facebook-jssdk") as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", initializeSdk, { once: true });
+      return () => existing.removeEventListener("load", initializeSdk);
+    }
+    const script = document.createElement("script");
+    script.id = "facebook-jssdk";
+    script.src = "https://connect.facebook.net/en_US/sdk.js";
+    script.async = true;
+    script.defer = true;
+    script.onload = initializeSdk;
+    script.onerror = () => setError("Meta JavaScript SDK could not be loaded.");
+    document.body.appendChild(script);
+    return () => {
+      script.onload = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleMetaMessage = (event: MessageEvent) => {
+      let hostname = "";
+      try {
+        hostname = new URL(event.origin).hostname;
+      } catch {
+        return;
+      }
+      if (!(hostname === "facebook.com" || hostname.endsWith(".facebook.com"))) return;
+      if (typeof event.data !== "string") return;
+
+      let payload: EmbeddedSignupMessage;
+      try {
+        payload = JSON.parse(event.data) as EmbeddedSignupMessage;
+      } catch {
+        return;
+      }
+      if (payload.type !== "WA_EMBEDDED_SIGNUP") return;
+
+      if (payload.event === "FINISH") {
+        const wabaId = payload.data?.waba_id;
+        const phoneNumberId = payload.data?.phone_number_id;
+        if (!wabaId || !phoneNumberId) {
+          setError("Meta completed signup without returning the WABA and phone number IDs.");
+          return;
+        }
+        signupPartsRef.current = {
+          ...signupPartsRef.current,
+          waba_id: wabaId,
+          phone_number_id: phoneNumberId,
+        };
+        void completeSignup();
+      } else if (payload.event === "CANCEL") {
+        setSignupStatus("Meta signup was cancelled. You can start again when ready.");
+      } else if (payload.event === "ERROR") {
+        setError(payload.data?.error_message || "Meta reported an Embedded Signup error.");
+      } else if (payload.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
+        setError("WhatsApp Business App coexistence onboarding is not enabled for this pilot.");
+      }
+    };
+
+    window.addEventListener("message", handleMetaMessage);
+    return () => window.removeEventListener("message", handleMetaMessage);
+  }, [completeSignup]);
 
   useEffect(() => {
     let mounted = true;
@@ -538,7 +755,44 @@ export default function HomePage() {
                 <div className="whatsapp-copy"><span className={connection?.status === "active" ? "pill pill-green" : "pill pill-amber"}>{connection?.status === "active" ? "Connected" : "Not connected"}</span>
                   <h2>{connection?.status === "active" ? "Your WhatsApp channel is connected" : "Connect your WhatsApp Business account"}</h2>
                   <p>{connection?.status === "active" ? "Inbound messages can be received and processed by your SmeOps assistant." : "Complete Meta Embedded Signup to connect your WhatsApp Business number. Your access token will be exchanged and stored securely by the backend."}</p>
-                  {connection?.status === "active" ? <div className="connection-details"><span>Phone number ID</span><strong>{connection.phone_number_id}</strong><span>WhatsApp Business Account</span><strong>{connection.business_account_id}</strong></div> : <button className="button button-primary" disabled>Embedded Signup setup pending</button>}
+                  {connection?.status === "active" ? (
+                    <div className="connection-details">
+                      <span>Business number</span><strong>{connection.display_phone_number ?? connection.phone_number_id}</strong>
+                      <span>Verified name</span><strong>{connection.verified_name ?? "Not returned by Meta"}</strong>
+                      <span>WhatsApp Business Account</span><strong>{connection.business_account_id}</strong>
+                      {connection.token_expires_at && <><span>Token expiry</span><strong>{dateTime(connection.token_expires_at)}</strong></>}
+                    </div>
+                  ) : connection?.status === "pending" ? (
+                    <div className="stack-form embedded-form">
+                      <p className="muted">Your Meta authorization is saved. Complete the remaining registration step.</p>
+                      {connection.onboarding_error_code && <p className="form-error">Meta error reference: {connection.onboarding_error_code}</p>}
+                      <button className="button button-primary" onClick={retryWhatsAppConnection} disabled={busy}>Retry connection</button>
+                    </div>
+                  ) : (
+                    <div className="stack-form embedded-form">
+                      <label>Choose a six-digit WhatsApp PIN
+                        <input
+                          inputMode="numeric"
+                          pattern="[0-9]{6}"
+                          maxLength={6}
+                          type="password"
+                          autoComplete="off"
+                          value={signupPin}
+                          onChange={(event) => {
+                            const nextPin = event.target.value.replace(/\D/g, "").slice(0, 6);
+                            signupPinRef.current = nextPin;
+                            setSignupPin(nextPin);
+                          }}
+                          placeholder="6-digit PIN"
+                        />
+                      </label>
+                      <p className="muted">This PIN enables WhatsApp two-step verification. It is encrypted by the backend and never returned to the browser after submission.</p>
+                      <button className="button button-primary" onClick={launchEmbeddedSignup} disabled={busy || !metaSdkReady || signupPin.length !== 6}>
+                        {metaSdkReady ? "Continue with Meta" : "Loading Meta signup…"}
+                      </button>
+                    </div>
+                  )}
+                  {signupStatus && <p className="signup-status">{signupStatus}</p>}
                 </div>
               </section>
               <div className="notice-panel"><strong>Before connecting</strong><p>Use a business-owned number and complete the Meta Business verification and app review requirements. Never paste an access token into this dashboard.</p></div>
