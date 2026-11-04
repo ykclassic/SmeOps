@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: smeops-api
+    runtime: docker
+    plan: starter
+    branch: main
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /health/ready
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_NAME
+        value: SmeOps API
+      - key: LOG_LEVEL
+        value: INFO
+      - key: JWT_ISSUER
+        value: smeops-api
+      - key: ACCESS_TOKEN_TTL_MINUTES
+        value: "30"
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_SECRET_KEY
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: PLATFORM_ADMIN_KEY
+        sync: false
+      - key: WHATSAPP_GRAPH_API_VERSION
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+
+  - type: worker
+    name: smeops-worker
+    runtime: docker
+    plan: starter
+    branch: main
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m app.worker
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_NAME
+        value: SmeOps Worker
+      - key: LOG_LEVEL
+        value: INFO
+      - key: JWT_ISSUER
+        value: smeops-api
+      - key: ACCESS_TOKEN_TTL_MINUTES
+        value: "30"
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_SECRET_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: WHATSAPP_GRAPH_API_VERSION
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
