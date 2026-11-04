@@ -93,7 +93,7 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
                                             "id": provider_message_id,
                                             "timestamp": "1793433600",
                                             "type": "text",
-                                            "text": {"body": "Hello SmeOps"},
+                                            "text": {"body": "STOP"},
                                         }
                                     ],
                                 }
@@ -161,7 +161,7 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
         persisted_job_id = job.id
         assert connection.access_token_encrypted != access_token
         assert decrypt_whatsapp_secret(connection.access_token_encrypted) == access_token
-        assert "Hello SmeOps" not in event.payload_encrypted
+        assert "STOP" not in event.payload_encrypted
         assert event.status == "queued"
         assert job.status == "queued"
 
@@ -214,12 +214,14 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
 
         conversation, inbound_message = asyncio.run(inspect_conversation())
         assert conversation.status == "active"
+        assert conversation.is_opted_out is True
+        assert conversation.opted_out_at is not None
         assert conversation.customer_phone_hash != "2348012345678"
         assert decrypt_whatsapp_secret(conversation.customer_phone_encrypted) == "2348012345678"
         assert inbound_message.direction == "inbound"
         assert inbound_message.message_type == "text"
         assert inbound_message.body_encrypted is not None
-        assert "Hello SmeOps" not in inbound_message.body_encrypted
-        assert decrypt_whatsapp_secret(inbound_message.body_encrypted) == "Hello SmeOps"
+        assert "STOP" not in inbound_message.body_encrypted
+        assert decrypt_whatsapp_secret(inbound_message.body_encrypted) == "STOP"
     finally:
         get_settings.cache_clear()
