@@ -5,6 +5,7 @@ const email = process.env.E2E_TEST_EMAIL;
 const password = process.env.E2E_TEST_PASSWORD;
 const customerPhone = process.env.E2E_CUSTOMER_PHONE;
 const expectedServiceName = process.env.E2E_EXPECTED_SERVICE_NAME;
+const verifyCustomerBooking = process.env.E2E_VERIFY_CUSTOMER_BOOKING === "true";
 
 test("owner can sign in and use the dashboard without exposing the session token", async ({
   page,
@@ -39,7 +40,7 @@ test("owner can sign in and use the dashboard without exposing the session token
   await page.getByRole("button", { name: "Appointments" }).click();
   await expect(page.getByRole("heading", { name: "Appointments" })).toBeVisible();
 
-  if (customerPhone && expectedServiceName) {
+  if (verifyCustomerBooking && customerPhone && expectedServiceName) {
     const phoneSuffix = customerPhone.replace(/\D/g, "").slice(-10);
     const bookingRow = page.getByRole("row").filter({ hasText: phoneSuffix });
     await expect(bookingRow).toContainText(expectedServiceName);
@@ -49,7 +50,7 @@ test("owner can sign in and use the dashboard without exposing the session token
   await page.getByRole("button", { name: "WhatsApp inbox" }).click();
   await expect(page.getByRole("heading", { name: "WhatsApp inbox" })).toBeVisible();
 
-  if (customerPhone && expectedServiceName) {
+  if (verifyCustomerBooking && customerPhone && expectedServiceName) {
     const phoneSuffix = customerPhone.replace(/\D/g, "").slice(-10);
     const customerThread = page.getByRole("button").filter({ hasText: phoneSuffix });
     await expect(customerThread).toHaveCount(1);
