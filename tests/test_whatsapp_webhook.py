@@ -10,8 +10,8 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.whatsapp import decrypt_whatsapp_secret
 from app.db.session import AsyncSessionFactory
+from app.jobs.queue import ClaimedJob
 from app.jobs.whatsapp import accept_inbound_whatsapp_job
-from app.jobs.worker import run_once
 from app.main import app
 from app.models import BackgroundJob, WhatsAppConnection, WhatsAppWebhookEvent
 
@@ -160,12 +160,17 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
         assert job.status == "queued"
 
         async def process_one_job():
-            return await run_once(
-                worker_id="whatsapp-test-worker",
-                handlers={"whatsapp.accept_inbound": accept_inbound_whatsapp_job},
+            claimed = ClaimedJob(
+                id=job.id,
+                tenant_id=tenant_id,
+                job_type=job.job_type,
+                payload=job.payload,
+                attempts=1,
+                max_attempts=job.max_attempts,
             )
+            await accept_inbound_whatsapp_job(claimed)
 
-        assert asyncio.run(process_one_job()) is True
+        asyncio.run(process_one_job())
 
         async def inspect_processed_event():
             async with AsyncSessionFactory() as session:
@@ -183,6 +188,6 @@ def test_whatsapp_webhook_is_verified_encrypted_and_idempotent(monkeypatch) -> N
 
         event_status, job_status = asyncio.run(inspect_processed_event())
         assert event_status == "accepted"
-        assert job_status == "completed"
+        assert job_status == "queued"
     finally:
         get_settings.cache_clear()

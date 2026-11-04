@@ -6,20 +6,32 @@ from collections.abc import Iterator
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.dependencies import DbSession
+from app.api.dependencies import DbSession, require_roles
 from app.core.config import get_settings
 from app.core.whatsapp import encrypt_whatsapp_secret
 from app.jobs.queue import enqueue_job
-from app.models import AuditEvent, Tenant, WhatsAppConnection, WhatsAppWebhookEvent
-from app.schemas.whatsapp import WhatsAppConnectionProvision, WhatsAppConnectionResponse
+from app.models import AuditEvent, Tenant, User, WhatsAppConnection, WhatsAppWebhookEvent
+from app.schemas.whatsapp import (
+    WhatsAppConnectionProvision,
+    WhatsAppConnectionResponse,
+    WhatsAppOutboundMessageResponse,
+    WhatsAppTextMessageRequest,
+)
+from app.services.whatsapp_outbound import (
+    OutboundIdempotencyConflict,
+    enqueue_whatsapp_text,
+)
 
 router = APIRouter(tags=["whatsapp integration"])
 logger = logging.getLogger(__name__)
+ManagerOrOwner = Annotated[
+    User, Depends(require_roles("owner", "manager"))
+]
 
 
 def _extract_event_payloads(payload: dict) -> Iterator[tuple[str, str, str, dict]]:
@@ -322,4 +334,41 @@ async def provision_whatsapp_connection(
         phone_number_id=connection.phone_number_id,
         business_account_id=connection.business_account_id,
         status=connection.status,
+    )
+
+
+
+@router.post(
+    "/whatsapp/messages",
+    response_model=WhatsAppOutboundMessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_whatsapp_text_message(
+    payload: WhatsAppTextMessageRequest,
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> WhatsAppOutboundMessageResponse:
+    try:
+        message = await enqueue_whatsapp_text(
+            session,
+            tenant_id=user.tenant_id,
+            recipient=payload.recipient,
+            body=payload.body,
+            idempotency_key=str(payload.idempotency_key),
+            actor_user_id=user.id,
+        )
+    except OutboundIdempotencyConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Idempotency key was already used for different message content",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return WhatsAppOutboundMessageResponse(
+        id=message.id,
+        status=message.status,
     )
