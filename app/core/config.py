@@ -114,6 +114,8 @@ class Settings(BaseSettings):
                 raise ValueError("DATABASE_URL must point to a managed production database")
             if self.whatsapp_token_encryption_key is None:
                 raise ValueError("WHATSAPP_TOKEN_ENCRYPTION_KEY is required in production")
+            if self.platform_admin_key is None:
+                raise ValueError("PLATFORM_ADMIN_KEY is required in production")
             if self.whatsapp_verify_token is None or self.whatsapp_app_secret is None:
                 raise ValueError(
                     "WhatsApp webhook verification secrets are required in production"
