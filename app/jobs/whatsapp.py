@@ -12,7 +12,7 @@ from app.core.whatsapp import (
     hash_whatsapp_contact,
 )
 from app.db.session import AsyncSessionFactory
-from app.jobs.queue import ClaimedJob
+from app.jobs.queue import ClaimedJob, enqueue_job
 from app.models import (
     WhatsAppConversation,
     WhatsAppConversationMessage,
@@ -32,7 +32,7 @@ def _provider_timestamp(value: object) -> datetime | None:
         return None
 
 
-async def _process_inbound_message(session, *, tenant_id: UUID, payload: dict) -> None:
+async def _process_inbound_message(\n    session, *, tenant_id: UUID, payload: dict\n) -> tuple[UUID, UUID] | None:
     message = payload.get("message")
     if not isinstance(message, dict):
         raise ValueError("Invalid inbound WhatsApp message payload")
@@ -228,11 +228,24 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
                 outbound_message.read_at = datetime.now(UTC)
 
         elif event.event_type == "message.received":
-            await _process_inbound_message(
+            persisted = await _process_inbound_message(
                 session,
                 tenant_id=job.tenant_id,
                 payload=payload,
             )
+            if persisted is not None:
+                conversation_id, message_id = persisted
+                await enqueue_job(
+                    session,
+                    tenant_id=job.tenant_id,
+                    job_type="whatsapp.process_conversation",
+                    payload={
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(message_id),
+                    },
+                    idempotency_key=f"wa:conversation:{message_id}",
+                    max_attempts=3,
+                )
 
         event.status = "processed"
         event.processed_at = datetime.now(UTC)
