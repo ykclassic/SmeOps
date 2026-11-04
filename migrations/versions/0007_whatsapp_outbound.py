@@ -29,12 +29,16 @@ def upgrade() -> None:
         sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True),
-            server_default=sa.func.now(), nullable=False,
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
         ),
         sa.CheckConstraint(
             "status IN ('queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'unknown')",
