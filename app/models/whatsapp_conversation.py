@@ -4,6 +4,7 @@ from typing import Literal
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -55,6 +56,13 @@ class WhatsAppConversation(UUIDPrimaryKey, TimestampMixin, Base):
         server_default=text("'{}'"),
     )
     last_inbound_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_opted_out: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    opted_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WhatsAppConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):

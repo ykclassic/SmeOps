@@ -1,13 +1,20 @@
 import asyncio
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.whatsapp import encrypt_whatsapp_secret, hash_whatsapp_contact
 from app.db.session import AsyncSessionFactory
 from app.main import app
-from app.models import BackgroundJob, Tenant, WhatsAppOutboundMessage
+from app.models import (
+    BackgroundJob,
+    Tenant,
+    WhatsAppConversation,
+    WhatsAppOutboundMessage,
+)
 
 
 def test_authenticated_owner_can_queue_tenant_scoped_whatsapp_message(monkeypatch):
@@ -48,6 +55,22 @@ def test_authenticated_owner_can_queue_tenant_scoped_whatsapp_message(monkeypatc
                 },
             )
             assert provision.status_code == 200
+
+            async def create_customer_conversation():
+                async with AsyncSessionFactory() as session:
+                    session.add(
+                        WhatsAppConversation(
+                            tenant_id=tenant_id,
+                            customer_phone_hash=hash_whatsapp_contact("2348012345678"),
+                            customer_phone_encrypted=encrypt_whatsapp_secret("2348012345678"),
+                            status="active",
+                            context={},
+                            last_inbound_at=datetime.now(UTC),
+                        )
+                    )
+                    await session.commit()
+
+            asyncio.run(create_customer_conversation())
 
             unauthorized = client.post(
                 "/whatsapp/messages",
