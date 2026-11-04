@@ -14,11 +14,24 @@ class WhatsAppConnectionProvision(BaseModel):
     access_token: SecretStr = Field(min_length=20, max_length=4096)
 
 
+class WhatsAppEmbeddedSignupRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    code: SecretStr = Field(min_length=10, max_length=2048)
+    waba_id: str = Field(pattern=r"^\d{5,80}$")
+    phone_number_id: str = Field(pattern=r"^\d{5,80}$")
+    two_step_pin: str = Field(pattern=r"^\d{6}$")
+
+
 class WhatsAppConnectionResponse(BaseModel):
     tenant_id: UUID
     phone_number_id: str
     business_account_id: str
-    status: str
+    status: Literal["pending", "active", "disabled"]
+    display_phone_number: str | None = None
+    verified_name: str | None = None
+    token_expires_at: datetime | None = None
+    onboarding_error_code: str | None = None
 
 
 class WhatsAppTextMessageRequest(BaseModel):
