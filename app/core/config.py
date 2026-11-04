@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     whatsapp_app_secret: SecretStr | None = None
     whatsapp_token_encryption_key: SecretStr | None = None
     platform_admin_key: SecretStr | None = None
-    whatsapp_graph_api_version: str | None = None\n    openai_api_key: SecretStr | None = None\n    openai_model: str | None = None
+    whatsapp_graph_api_version: str | None = None
+    openai_api_key: SecretStr | None = None
+    openai_model: str | None = None
 
     @field_validator(
         "whatsapp_verify_token",
