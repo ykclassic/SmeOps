@@ -193,9 +193,7 @@ def test_embedded_signup_is_durable_encrypted_retryable_and_owner_managed(monkey
                     return (
                         connection.status,
                         decrypt_whatsapp_secret(connection.access_token_encrypted),
-                        decrypt_whatsapp_secret(
-                            connection.two_step_verification_pin_encrypted
-                        ),
+                        connection.two_step_verification_pin_encrypted,
                         {event.event_type for event in events.scalars().all()},
                     )
 
@@ -204,7 +202,7 @@ def test_embedded_signup_is_durable_encrypted_retryable_and_owner_managed(monkey
             )
             assert status_value == "disabled"
             assert stored_token == "test-business-integration-token-123456"
-            assert stored_pin == "123456"
+            assert stored_pin is None
             assert {
                 "whatsapp.connection.onboarding_started",
                 "whatsapp.connection.onboarding_failed",
