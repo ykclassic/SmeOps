@@ -59,6 +59,7 @@ Do not set `META_APP_SECRET`, WhatsApp access tokens, or encryption keys as `NEX
 - The access token and PIN are encrypted at rest.
 - The backend verifies the phone-number/WABA relationship before registration.
 - A phone number cannot be connected to more than one SmeOps tenant.
+- The owner can disable the SmeOps connection. This stops SmeOps processing and outbound sends but does not revoke the Meta business integration token or remove the app from the WABA; remove the SmeOps app in Meta Business settings to revoke authorization fully.
 - Outbound messaging remains disabled until connection status becomes `active`.
 - The token expiry timestamp is stored when Meta returns `expires_in`; automatic token refresh/rotation is not yet implemented.
 - Coexistence onboarding, multiple phone numbers per tenant, partner credit-line management and Meta template management are not implemented in this pilot.
