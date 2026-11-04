@@ -7,16 +7,16 @@ from sqlalchemy.exc import IntegrityError
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import Tenant, User
-from app.services.auth_rate_limit import (
-    AuthRateLimitExceeded,
-    clear_auth_attempts,
-    consume_auth_attempt,
-)
 from app.schemas.auth import (
     CurrentUserResponse,
     LoginRequest,
     RegisterRequest,
     TokenResponse,
+)
+from app.services.auth_rate_limit import (
+    AuthRateLimitExceeded,
+    clear_auth_attempts,
+    consume_auth_attempt,
 )
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
