@@ -13,10 +13,18 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import DbSession, require_roles
 from app.core.config import get_settings
-from app.core.whatsapp import decrypt_whatsapp_secret, encrypt_whatsapp_secret
+from app.core.whatsapp import (
+    decrypt_whatsapp_secret,
+    encrypt_whatsapp_secret,
+)
+from app.integrations.meta_whatsapp import (
+    MetaGraphAPIError,
+    exchange_embedded_signup_code,
+)
 from app.jobs.queue import enqueue_job
 from app.models import (
     AuditEvent,
+    BackgroundJob,
     Tenant,
     User,
     WhatsAppConnection,
@@ -29,6 +37,7 @@ from app.schemas.whatsapp import (
     WhatsAppConnectionResponse,
     WhatsAppConversationMessageResponse,
     WhatsAppConversationResponse,
+    WhatsAppEmbeddedSignupRequest,
     WhatsAppOutboundMessageResponse,
     WhatsAppTextMessageRequest,
 )
@@ -43,6 +52,7 @@ logger = logging.getLogger(__name__)
 ManagerOrOwner = Annotated[
     User, Depends(require_roles("owner", "manager"))
 ]
+OwnerOnly = Annotated[User, Depends(require_roles("owner"))]
 
 
 def _extract_event_payloads(payload: dict) -> Iterator[tuple[str, str, str, dict]]:
@@ -347,6 +357,337 @@ async def provision_whatsapp_connection(
         status=connection.status,
     )
 
+
+
+@router.post(
+    "/whatsapp/embedded-signup",
+    response_model=WhatsAppConnectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def complete_embedded_signup(
+    request: WhatsAppEmbeddedSignupRequest,
+    session: DbSession,
+    user: OwnerOnly,
+) -> WhatsAppConnectionResponse:
+    settings = get_settings()
+    if (
+        settings.meta_app_id is None
+        or settings.meta_app_secret is None
+        or settings.whatsapp_graph_api_version is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WhatsApp Embedded Signup is not configured",
+        )
+
+    other_owner_precheck = await session.execute(
+        select(WhatsAppConnection.tenant_id).where(
+            WhatsAppConnection.phone_number_id == request.phone_number_id,
+            WhatsAppConnection.tenant_id != user.tenant_id,
+        )
+    )
+    if other_owner_precheck.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This WhatsApp number is already connected to another workspace",
+        )
+    existing_precheck = await session.execute(
+        select(WhatsAppConnection)
+        .where(WhatsAppConnection.tenant_id == user.tenant_id)
+        .with_for_update()
+    )
+    existing_connection = existing_precheck.scalar_one_or_none()
+    if (
+        existing_connection is not None
+        and existing_connection.status == "active"
+        and existing_connection.phone_number_id != request.phone_number_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disconnect the current WhatsApp number before connecting a different number",
+        )
+
+    if existing_connection is not None and existing_connection.status == "pending":
+        active_onboarding = await session.execute(
+            select(BackgroundJob.id)
+            .where(
+                BackgroundJob.tenant_id == user.tenant_id,
+                BackgroundJob.job_type == "whatsapp.complete_signup",
+                BackgroundJob.status.in_(["queued", "running"]),
+                BackgroundJob.idempotency_key.like(
+                    f"wa:onboarding%:{existing_connection.id}:%"
+                ),
+            )
+            .limit(1)
+        )
+        if active_onboarding.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "WhatsApp onboarding is still processing. "
+                    "Retry or wait for the worker to finish."
+                ),
+            )
+
+    try:
+        token = await exchange_embedded_signup_code(
+            api_version=settings.whatsapp_graph_api_version,
+            app_id=settings.meta_app_id,
+            app_secret=settings.meta_app_secret.get_secret_value(),
+            code=request.code.get_secret_value(),
+        )
+    except MetaGraphAPIError as exc:
+        logger.warning(
+            "Meta authorization code exchange failed",
+            extra={
+                "tenant_id": str(user.tenant_id),
+                "error_code": exc.error_code,
+                "http_status": exc.status_code,
+            },
+        )
+        response_status = (
+            status.HTTP_400_BAD_REQUEST
+            if exc.status_code == 400
+            else status.HTTP_502_BAD_GATEWAY
+        )
+        raise HTTPException(
+            status_code=response_status,
+            detail="Meta authorization code could not be exchanged. Restart Embedded Signup.",
+        ) from exc
+
+    other_owner_result = await session.execute(
+        select(WhatsAppConnection.tenant_id).where(
+            WhatsAppConnection.phone_number_id == request.phone_number_id,
+            WhatsAppConnection.tenant_id != user.tenant_id,
+        )
+    )
+    if other_owner_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This WhatsApp number is already connected to another workspace",
+        )
+
+    connection_result = await session.execute(
+        select(WhatsAppConnection)
+        .where(WhatsAppConnection.tenant_id == user.tenant_id)
+        .with_for_update()
+    )
+    connection = connection_result.scalar_one_or_none()
+    if (
+        connection is not None
+        and connection.status == "active"
+        and connection.phone_number_id != request.phone_number_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disconnect the current WhatsApp number before connecting a different number",
+        )
+
+    if connection is None:
+        connection = WhatsAppConnection(
+            id=uuid4(),
+            tenant_id=user.tenant_id,
+            phone_number_id=request.phone_number_id,
+            business_account_id=request.waba_id,
+            access_token_encrypted=encrypt_whatsapp_secret(token.value),
+            status="pending",
+        )
+        session.add(connection)
+    else:
+        connection.phone_number_id = request.phone_number_id
+        connection.business_account_id = request.waba_id
+        connection.access_token_encrypted = encrypt_whatsapp_secret(token.value)
+        connection.status = "pending"
+
+    connection.display_phone_number = None
+    connection.verified_name = None
+    connection.token_expires_at = token.expires_at
+    connection.two_step_verification_pin_encrypted = encrypt_whatsapp_secret(
+        request.two_step_pin
+    )
+    connection.onboarding_error_code = None
+    session.add(
+        AuditEvent(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            event_type="whatsapp.connection.onboarding_started",
+            subject_type="whatsapp_connection",
+            subject_id=connection.id,
+            payload={
+                "phone_number_id": request.phone_number_id,
+                "business_account_id": request.waba_id,
+            },
+        )
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This WhatsApp number is already connected to another workspace",
+        ) from exc
+
+    code_fingerprint = hashlib.sha256(
+        request.code.get_secret_value().encode()
+    ).hexdigest()
+    await enqueue_job(
+        session,
+        tenant_id=user.tenant_id,
+        job_type="whatsapp.complete_signup",
+        payload={"connection_id": str(connection.id)},
+        idempotency_key=f"wa:onboarding:{connection.id}:{code_fingerprint}",
+        max_attempts=3,
+    )
+    await session.commit()
+
+    return WhatsAppConnectionResponse(
+        tenant_id=connection.tenant_id,
+        phone_number_id=connection.phone_number_id,
+        business_account_id=connection.business_account_id,
+        status=connection.status,
+        display_phone_number=connection.display_phone_number,
+        verified_name=connection.verified_name,
+        token_expires_at=connection.token_expires_at,
+        onboarding_error_code=connection.onboarding_error_code,
+    )
+
+
+@router.post(
+    "/whatsapp/connection/disconnect",
+    response_model=WhatsAppConnectionResponse,
+)
+async def disable_whatsapp_connection(
+    session: DbSession,
+    user: OwnerOnly,
+) -> WhatsAppConnectionResponse:
+    result = await session.execute(
+        select(WhatsAppConnection)
+        .where(WhatsAppConnection.tenant_id == user.tenant_id)
+        .with_for_update()
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="WhatsApp connection not found",
+        )
+    if connection.status != "disabled":
+        connection.status = "disabled"
+        session.add(
+            AuditEvent(
+                tenant_id=user.tenant_id,
+                actor_user_id=user.id,
+                event_type="whatsapp.connection.disabled",
+                subject_type="whatsapp_connection",
+                subject_id=connection.id,
+                payload={"phone_number_id": connection.phone_number_id},
+            )
+        )
+        await session.commit()
+    return WhatsAppConnectionResponse(
+        tenant_id=connection.tenant_id,
+        phone_number_id=connection.phone_number_id,
+        business_account_id=connection.business_account_id,
+        status=connection.status,
+        display_phone_number=connection.display_phone_number,
+        verified_name=connection.verified_name,
+        token_expires_at=connection.token_expires_at,
+        onboarding_error_code=connection.onboarding_error_code,
+    )
+
+
+@router.post(
+    "/whatsapp/connection/complete",
+    response_model=WhatsAppConnectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_pending_whatsapp_connection(
+    session: DbSession,
+    user: OwnerOnly,
+) -> WhatsAppConnectionResponse:
+    result = await session.execute(
+        select(WhatsAppConnection)
+        .where(
+            WhatsAppConnection.tenant_id == user.tenant_id,
+            WhatsAppConnection.status == "pending",
+        )
+        .with_for_update()
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="There is no pending WhatsApp connection to complete",
+        )
+
+    active_job_result = await session.execute(
+        select(BackgroundJob.id)
+        .where(
+            BackgroundJob.tenant_id == user.tenant_id,
+            BackgroundJob.job_type == "whatsapp.complete_signup",
+            BackgroundJob.status.in_(["queued", "running"]),
+            BackgroundJob.idempotency_key.like(
+                f"wa:onboarding%:{connection.id}:%"
+            ),
+        )
+        .limit(1)
+    )
+    if active_job_result.scalar_one_or_none() is None:
+        updated_at = connection.updated_at.isoformat()
+        retry_fingerprint = hashlib.sha256(
+            f"{connection.id}:{updated_at}".encode()
+        ).hexdigest()
+        await enqueue_job(
+            session,
+            tenant_id=user.tenant_id,
+            job_type="whatsapp.complete_signup",
+            payload={"connection_id": str(connection.id)},
+            idempotency_key=(
+                f"wa:onboarding-retry:{connection.id}:{retry_fingerprint}"
+            ),
+            max_attempts=3,
+        )
+        await session.commit()
+
+    return WhatsAppConnectionResponse(
+        tenant_id=connection.tenant_id,
+        phone_number_id=connection.phone_number_id,
+        business_account_id=connection.business_account_id,
+        status=connection.status,
+        display_phone_number=connection.display_phone_number,
+        verified_name=connection.verified_name,
+        token_expires_at=connection.token_expires_at,
+        onboarding_error_code=connection.onboarding_error_code,
+    )
+
+
+@router.get(
+    "/whatsapp/connection",
+    response_model=WhatsAppConnectionResponse | None,
+)
+async def get_whatsapp_connection(
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> WhatsAppConnectionResponse | None:
+    result = await session.execute(
+        select(WhatsAppConnection).where(
+            WhatsAppConnection.tenant_id == user.tenant_id,
+        )
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        return None
+    return WhatsAppConnectionResponse(
+        tenant_id=connection.tenant_id,
+        phone_number_id=connection.phone_number_id,
+        business_account_id=connection.business_account_id,
+        status=connection.status,
+        display_phone_number=connection.display_phone_number,
+        verified_name=connection.verified_name,
+        token_expires_at=connection.token_expires_at,
+        onboarding_error_code=connection.onboarding_error_code,
+    )
 
 
 @router.get(

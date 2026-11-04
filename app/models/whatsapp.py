@@ -25,7 +25,7 @@ class WhatsAppConnection(UUIDPrimaryKey, TimestampMixin, Base):
         UniqueConstraint("tenant_id", name="uq_whatsapp_connections_tenant"),
         UniqueConstraint("phone_number_id", name="uq_whatsapp_connections_phone_number"),
         CheckConstraint(
-            "status IN ('active', 'disabled')",
+            "status IN ('pending', 'active', 'disabled')",
             name="whatsapp_connection_status_valid",
         ),
     )
@@ -36,9 +36,16 @@ class WhatsAppConnection(UUIDPrimaryKey, TimestampMixin, Base):
     phone_number_id: Mapped[str] = mapped_column(String(80), nullable=False)
     business_account_id: Mapped[str] = mapped_column(String(80), nullable=False)
     access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[Literal["active", "disabled"]] = mapped_column(
+    status: Mapped[Literal["pending", "active", "disabled"]] = mapped_column(
         String(16), nullable=False, default="active", server_default=text("'active'")
     )
+    display_phone_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    verified_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    two_step_verification_pin_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    onboarding_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
 class WhatsAppWebhookEvent(UUIDPrimaryKey, Base):
