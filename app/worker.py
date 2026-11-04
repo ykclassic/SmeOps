@@ -3,8 +3,8 @@ from uuid import uuid4
 
 from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.jobs.whatsapp_outbound import send_outbound_whatsapp_job
-from app.services.whatsapp_conversation import process_whatsapp_conversation_job
 from app.jobs.worker import run_forever
+from app.services.whatsapp_conversation import process_whatsapp_conversation_job
 
 
 async def main() -> None:
