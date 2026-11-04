@@ -56,7 +56,7 @@ Do not set `META_APP_SECRET`, WhatsApp access tokens, or encryption keys as `NEX
 - Only a tenant owner can start or retry Embedded Signup.
 - Tenant ID comes from the authenticated owner; it is never accepted from the browser.
 - The authorization code, Meta app secret, access token and two-step PIN are not logged or returned in API responses.
-- The access token and PIN are encrypted at rest.
+- The business access token is encrypted at rest. The two-step PIN is encrypted only while onboarding is pending and is erased immediately after Meta confirms number registration.
 - The backend verifies the phone-number/WABA relationship before registration.
 - A phone number cannot be connected to more than one SmeOps tenant.
 - The owner can disable the SmeOps connection. This stops SmeOps processing and outbound sends but does not revoke the Meta business integration token or remove the app from the WABA; remove the SmeOps app in Meta Business settings to revoke authorization fully.
