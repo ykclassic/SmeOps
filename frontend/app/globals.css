@@ -263,3 +263,6 @@ td strong { display: block; color: var(--ink); font-size: 11px; }
   .whatsapp-illustration { width: 70px; height: 70px; border-radius: 20px; font-size: 40px; }
   .connection-details { grid-template-columns: 1fr; }
 }
+
+.signup-status { margin: 12px 0 0; color: #708077; font-size: 10px; line-height: 1.6; }
+.embedded-form { max-width: 420px; padding: 14px 0 0; }
