@@ -231,6 +231,7 @@ export default function HomePage() {
     setError("");
     setSignupStatus("Waiting for you to complete Meta's secure signup window…");
     const solutionId = process.env.NEXT_PUBLIC_META_SOLUTION_ID;
+    const extras = solutionId ? { setup: { solutionID: solutionId } } : {};
     window.FB.login(
       (response) => {
         const code = response.authResponse?.code;
@@ -243,9 +244,10 @@ export default function HomePage() {
       },
       {
         config_id: configId,
+        auth_type: "rerequest",
         response_type: "code",
         override_default_response_type: true,
-        extras: { setup: solutionId ? { solutionID: solutionId } : {} },
+        extras,
       },
     );
   }
