@@ -14,6 +14,10 @@ from app.integrations.whatsapp_cloud import (
 )
 from app.jobs.queue import ClaimedJob
 from app.models import WhatsAppConnection, WhatsAppOutboundMessage
+from app.services.whatsapp_outbound import (
+    OutboundPolicyViolation,
+    assert_outbound_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +74,18 @@ async def send_outbound_whatsapp_job(job: ClaimedJob) -> None:
 
         recipient = decrypt_whatsapp_secret(message.recipient_encrypted)
         body = decrypt_whatsapp_secret(message.body_encrypted)
+        try:
+            await assert_outbound_policy(
+                session,
+                tenant_id=job.tenant_id,
+                recipient=recipient,
+            )
+        except OutboundPolicyViolation as exc:
+            message.status = "failed"
+            message.last_error_code = exc.error_code
+            await session.commit()
+            return
+
         access_token = decrypt_whatsapp_secret(connection.access_token_encrypted)
         phone_number_id = connection.phone_number_id
         message.status = "sending"
