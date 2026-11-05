@@ -1,0 +1,90 @@
+name: Temporary frontend lockfile bootstrap
+
+on:
+  push:
+    branches:
+      - security/nextjs-react-patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: frontend-lockfile-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  generate-verify-and-commit:
+    if: github.ref == 'refs/heads/security/nextjs-react-patch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out PR #10 branch
+        uses: actions/checkout@v4
+        with:
+          ref: security/nextjs-react-patch
+          persist-credentials: true
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Confirm target manifest
+        working-directory: frontend
+        run: |
+          node -e "const p=require('./package.json'); if(p.dependencies.next!=='15.5.28'||p.dependencies.react!=='19.1.10'||p.dependencies['react-dom']!=='19.1.10') process.exit(1); console.log('Manifest versions:', p.dependencies.next, p.dependencies.react, p.dependencies['react-dom']);"
+
+      - name: Generate lockfile with npm dependency resolver
+        working-directory: frontend
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify generated lockfile and resolved versions
+        working-directory: frontend
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          const expected = {
+            next: '15.5.28',
+            react: '19.1.10',
+            'react-dom': '19.1.10',
+          };
+          if (lock.lockfileVersion !== 3) {
+            throw new Error(`Expected lockfileVersion 3, received ${lock.lockfileVersion}`);
+          }
+          for (const [name, version] of Object.entries(expected)) {
+            const resolved = lock.packages?.[`node_modules/${name}`]?.version;
+            if (resolved !== version) {
+              throw new Error(`${name}: expected ${version}, received ${resolved ?? 'missing'}`);
+            }
+            console.log(`${name}: ${resolved}`);
+          }
+          if (!lock.packages || !lock.packages['']) {
+            throw new Error('Lockfile is missing its root package metadata');
+          }
+          console.log('Generated npm lockfile verified.');
+          NODE
+
+      - name: Install exactly from generated lockfile
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Commit generated lockfile to PR #10 branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No lockfile changes to commit."
+            exit 0
+          fi
+          git commit -m "build(frontend): add npm lockfile"
+          git push origin HEAD:refs/heads/security/nextjs-react-patch
