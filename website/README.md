@@ -11,6 +11,10 @@ Static public-facing product website intended to support product discovery and M
 - `contact.html` — support and privacy-request route.
 - `styles.css` — responsive styles.
 
+## Support and privacy contact
+
+The public contact address is `techsolutehub@gmail.com`. Ensure this mailbox is actively monitored and access is restricted to personnel authorised to handle support and privacy requests. Do not request passwords or access tokens by email.
+
 ## Deploy
 
 Deploy this directory as a static site on Vercel (or another static host):
@@ -24,8 +28,8 @@ Deploy this directory as a static site on Vercel (or another static host):
 
 ## Before submitting for Meta review
 
-- Replace GitHub Issues as the contact route with a monitored, private support/privacy contact channel before accepting real personal-data requests. The current deletion page is an instruction page; it is not a Meta data-deletion callback endpoint and does not automatically erase records.
-- Review the Privacy Policy and Terms with the service operator and legal adviser; confirm controller/processor roles, retention periods, legal basis, data-subject request workflow and cross-border safeguards.
+- Confirm the support mailbox is monitored and the request-handling process is operational. The deletion page is an instruction page; it is not a Meta data-deletion callback endpoint and does not automatically erase records.
+- Review the Privacy Policy and Terms against actual service behaviour and with a qualified legal adviser; confirm controller/processor roles, retention periods, legal basis, data-subject request workflow and cross-border safeguards.
 - Confirm the public website's product statements match the exact app-review screencast and requested permissions.
 - Keep the product in test mode until live Meta app permissions, webhook delivery and customer journeys have been independently tested.
 
