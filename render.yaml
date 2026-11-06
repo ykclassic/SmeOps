@@ -2,20 +2,22 @@ services:
   - type: web
     name: smeops-api
     runtime: docker
-    plan: starter
+    # This blueprint is for the free staging deployment. It is not a production
+    # availability guarantee; upgrade the service architecture before production.
+    plan: free
     branch: main
     autoDeploy: false
     dockerfilePath: ./Dockerfile
     dockerContext: .
     # The database-backed worker runs in this single API process. Do not increase
-    # Uvicorn workers or add a second worker service without changing the singleton
-    # coordination and deployment design.
+    # Uvicorn workers or add a second worker service without changing coordination.
     dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
-    preDeployCommand: alembic upgrade head
+    # Free Render services do not support paid pre-deploy commands. Apply schema
+    # changes with the repository's manually dispatched staging migration workflow.
     healthCheckPath: /health/ready
     envVars:
       - key: APP_ENV
-        value: production
+        value: staging
       - key: APP_NAME
         value: SmeOps API
       - key: LOG_LEVEL
