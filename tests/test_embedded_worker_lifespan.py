@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,7 +20,10 @@ async def test_staging_lifespan_starts_and_stops_embedded_worker(monkeypatch):
 
     monkeypatch.setattr("app.main.settings.app_env", "staging")
     monkeypatch.setattr("app.main.run_embedded_worker", fake_worker)
-    monkeypatch.setattr("app.main.engine.dispose", fake_dispose)
+    monkeypatch.setattr(
+        "app.main.engine",
+        SimpleNamespace(dispose=fake_dispose),
+    )
 
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
@@ -40,7 +44,10 @@ async def test_test_environment_does_not_start_embedded_worker(monkeypatch):
 
     monkeypatch.setattr("app.main.settings.app_env", "test")
     monkeypatch.setattr("app.main.run_embedded_worker", fake_worker)
-    monkeypatch.setattr("app.main.engine.dispose", fake_dispose)
+    monkeypatch.setattr(
+        "app.main.engine",
+        SimpleNamespace(dispose=fake_dispose),
+    )
 
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
