@@ -5,7 +5,8 @@ Static public-facing product website intended to support product discovery and M
 ## Pages
 
 - `index.html` — product overview, workflow and feature description.
-- `privacy.html` — privacy practices and data categories.
+- `privacy.html` — privacy practices and data categories; public URL: `/privacy.html`.
+- `data-deletion.html` — user data deletion instructions; separate public URL: `/data-deletion.html`.
 - `terms.html` — terms of use for pilot/testing.
 - `contact.html` — support and privacy-request route.
 - `styles.css` — responsive styles.
@@ -19,11 +20,11 @@ Deploy this directory as a static site on Vercel (or another static host):
 3. Use the static/no-build output configuration (no build command; output directory is `.`).
 4. Add the approved production domain to the Meta app's App Domains and Valid OAuth Redirect URIs where applicable.
 5. Configure the same domain in the Meta Embedded Signup / Facebook Login settings and the relevant WhatsApp webhook/app settings.
-6. Verify all pages over HTTPS and ensure the privacy policy URL is publicly accessible without login.
+6. Verify all pages over HTTPS and ensure the privacy policy URL and user data deletion URL are separately accessible over HTTPS without login. Add both exact URLs to the corresponding Meta app settings and verify them while logged out.
 
 ## Before submitting for Meta review
 
-- Replace GitHub Issues as the contact route with a monitored, private support/privacy contact channel before accepting real personal-data requests.
+- Replace GitHub Issues as the contact route with a monitored, private support/privacy contact channel before accepting real personal-data requests. The current deletion page is an instruction page; it is not a Meta data-deletion callback endpoint and does not automatically erase records.
 - Review the Privacy Policy and Terms with the service operator and legal adviser; confirm controller/processor roles, retention periods, legal basis, data-subject request workflow and cross-border safeguards.
 - Confirm the public website's product statements match the exact app-review screencast and requested permissions.
 - Keep the product in test mode until live Meta app permissions, webhook delivery and customer journeys have been independently tested.
