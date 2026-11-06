@@ -132,21 +132,26 @@ async def run_forever(
     loop = asyncio.get_running_loop()
     await _safe_worker_heartbeat(worker_id)
     last_heartbeat = loop.time()
-    while stop_event is None or not stop_event.is_set():
-        if loop.time() - last_heartbeat >= heartbeat_interval_seconds:
-            await _safe_worker_heartbeat(worker_id)
-            last_heartbeat = loop.time()
-        did_work = await run_once(worker_id=worker_id, handlers=handlers)
-        if not did_work:
-            if stop_event is None:
-                await asyncio.sleep(poll_interval_seconds)
-            else:
-                try:
-                    await asyncio.wait_for(
-                        stop_event.wait(),
-                        timeout=poll_interval_seconds,
-                    )
-                except TimeoutError:
-                    pass
+    try:
+        while stop_event is None or not stop_event.is_set():
+            if loop.time() - last_heartbeat >= heartbeat_interval_seconds:
+                await _safe_worker_heartbeat(worker_id)
+                last_heartbeat = loop.time()
 
-    await _safe_worker_heartbeat(worker_id, stopped=True)
+            did_work = await run_once(worker_id=worker_id, handlers=handlers)
+            if not did_work:
+                if stop_event is None:
+                    await asyncio.sleep(poll_interval_seconds)
+                else:
+                    try:
+                        await asyncio.wait_for(
+                            stop_event.wait(),
+                            timeout=poll_interval_seconds,
+                        )
+                    except TimeoutError:
+                        pass
+    finally:
+        # Also run on task cancellation, so an orderly shutdown does not leave a
+        # misleading running heartbeat behind. A hard process kill is detected
+        # by the freshness threshold in /health/worker.
+        await _safe_worker_heartbeat(worker_id, stopped=True)
