@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
@@ -11,15 +12,53 @@ from app.api.retail import router as retail_router
 from app.api.whatsapp import router as whatsapp_router
 from app.core.config import get_settings
 from app.db.session import engine
+from app.worker import run_embedded_worker
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
+logger = logging.getLogger(__name__)
+
+WORKER_SHUTDOWN_TIMEOUT_SECONDS = 20
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
-    await engine.dispose()
+    stop_event = asyncio.Event()
+    worker_task: asyncio.Task[None] | None = None
+
+    # Tests deliberately run without a competing background consumer. Staging and
+    # production run one worker inside the API process to avoid a paid Render worker.
+    if settings.app_env in {"staging", "production"}:
+        worker_task = asyncio.create_task(
+            run_embedded_worker(stop_event),
+            name="smeops-embedded-worker",
+        )
+        logger.info("Embedded background worker scheduled")
+
+    try:
+        yield
+    finally:
+        if worker_task is not None:
+            stop_event.set()
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(worker_task),
+                    timeout=WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Embedded worker did not stop before shutdown deadline; cancelling"
+                )
+                worker_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await worker_task
+            except asyncio.CancelledError:
+                worker_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await worker_task
+            except Exception:
+                logger.exception("Embedded worker exited with an error")
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -30,6 +69,8 @@ app = FastAPI(
     redoc_url=None if settings.app_env == "production" else "/redoc",
     openapi_url=None if settings.app_env == "production" else "/openapi.json",
 )
+
+
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
