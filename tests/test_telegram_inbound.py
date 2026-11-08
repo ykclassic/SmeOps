@@ -56,7 +56,7 @@ async def test_inbound_update_persists_chat_identity_and_encrypted_text(monkeypa
             "message": {
                 "message_id": 101,
                 "date": 1_798_000_000,
-                "chat": {"id": -1001234567890},
+                "chat": {"id": 1234567890, "type": "private"},
                 "from": {"id": 123456, "first_name": "Ada", "last_name": "Okafor"},
                 "text": "I need an appointment",
             }
