@@ -2,6 +2,13 @@ from app.models.auth_rate_limit import AuthRateLimitBucket
 from app.models.business import Appointment, AuditEvent, BusinessHours, Customer, Service
 from app.models.jobs import BackgroundJob
 from app.models.retail import Order, OrderItem, Product
+from app.models.telegram import (
+    TelegramConnection,
+    TelegramConversation,
+    TelegramConversationMessage,
+    TelegramOutboundMessage,
+    TelegramWebhookEvent,
+)
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.whatsapp import WhatsAppConnection, WhatsAppWebhookEvent
@@ -24,6 +31,11 @@ __all__ = [
     "Product",
     "Service",
     "Tenant",
+    "TelegramConnection",
+    "TelegramConversation",
+    "TelegramConversationMessage",
+    "TelegramOutboundMessage",
+    "TelegramWebhookEvent",
     "User",
     "WhatsAppConnection",
     "WhatsAppConversation",

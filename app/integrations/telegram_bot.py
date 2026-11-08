@@ -1,0 +1,144 @@
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+
+@dataclass(frozen=True)
+class TelegramBotIdentity:
+    bot_id: str
+    username: str | None
+
+
+@dataclass(frozen=True)
+class TelegramSendResult:
+    provider_message_id: str
+
+
+class TelegramSendRejected(RuntimeError):
+    """Telegram definitively rejected the outbound message."""
+
+
+class TelegramDeliveryUnknown(RuntimeError):
+    """Telegram may have accepted the request; retrying could duplicate it."""
+
+
+class TelegramAPIError(RuntimeError):
+    """Telegram rejected a provisioning/API operation."""
+
+
+def _validate_token(bot_token: str) -> None:
+    if not bot_token or len(bot_token) > 256 or ":" not in bot_token:
+        raise ValueError("Invalid Telegram bot token")
+
+
+async def _call_bot_api(
+    *,
+    bot_token: str,
+    method: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    _validate_token(bot_token)
+    url = f"https://api.telegram.org/bot{bot_token}/{method}"
+    timeout = httpx.Timeout(20.0, connect=5.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, json=payload)
+    except httpx.TransportError:
+        raise TelegramDeliveryUnknown("Telegram API outcome is unknown") from None
+
+    try:
+        data = response.json()
+    except (ValueError, TypeError):
+        if response.status_code >= 500 or response.status_code < 200:
+            raise TelegramDeliveryUnknown("Telegram API outcome is unknown") from None
+        raise TelegramAPIError("Telegram returned an invalid API response") from None
+
+    if response.status_code >= 500 or response.status_code < 200:
+        raise TelegramDeliveryUnknown("Telegram API outcome is unknown")
+    if not isinstance(data, dict) or data.get("ok") is not True:
+        description = data.get("description") if isinstance(data, dict) else None
+        # Do not expose provider descriptions; they can contain sensitive details.
+        raise TelegramAPIError(
+            "Telegram API request was rejected"
+            if not description
+            else "Telegram API request was rejected"
+        )
+    result = data.get("result")
+    if isinstance(result, dict):
+        return result
+    if result is True:
+        return {}
+    raise TelegramDeliveryUnknown("Telegram API response did not contain a result")
+
+
+async def get_bot_identity(*, bot_token: str) -> TelegramBotIdentity:
+    result = await _call_bot_api(bot_token=bot_token, method="getMe", payload={})
+    bot_id = result.get("id")
+    username = result.get("username")
+    if isinstance(bot_id, bool) or not isinstance(bot_id, int) or bot_id <= 0:
+        raise TelegramAPIError("Telegram getMe returned an invalid bot identity")
+    if username is not None and (
+        not isinstance(username, str) or len(username) > 80
+    ):
+        raise TelegramAPIError("Telegram getMe returned an invalid bot username")
+    return TelegramBotIdentity(bot_id=str(bot_id), username=username)
+
+
+async def register_webhook(
+    *,
+    bot_token: str,
+    webhook_url: str,
+    secret_token: str,
+) -> None:
+    if not webhook_url.startswith("https://") or len(webhook_url) > 2048:
+        raise ValueError("Telegram webhook URL must be a valid HTTPS URL")
+    if not 1 <= len(secret_token) <= 256:
+        raise ValueError("Invalid Telegram webhook secret")
+    allowed = set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+    )
+    if any(character not in allowed for character in secret_token):
+        raise ValueError("Invalid Telegram webhook secret characters")
+    await _call_bot_api(
+        bot_token=bot_token,
+        method="setWebhook",
+        payload={
+            "url": webhook_url,
+            "secret_token": secret_token,
+            "allowed_updates": ["message"],
+            "drop_pending_updates": False,
+        },
+    )
+
+
+async def remove_webhook(*, bot_token: str) -> None:
+    await _call_bot_api(
+        bot_token=bot_token,
+        method="deleteWebhook",
+        payload={"drop_pending_updates": False},
+    )
+
+
+async def send_text_message(
+    *,
+    bot_token: str,
+    chat_id: str,
+    body: str,
+) -> TelegramSendResult:
+    if not chat_id or len(chat_id) > 80:
+        raise ValueError("Invalid Telegram chat identifier")
+    if not body or len(body) > 4096:
+        raise ValueError("Telegram text must contain 1 to 4096 characters")
+    try:
+        result = await _call_bot_api(
+            bot_token=bot_token,
+            method="sendMessage",
+            payload={"chat_id": chat_id, "text": body},
+        )
+    except TelegramAPIError as exc:
+        raise TelegramSendRejected("Telegram rejected the message request") from exc
+    message_id = result.get("message_id")
+    if isinstance(message_id, bool) or not isinstance(message_id, (str, int)):
+        raise TelegramDeliveryUnknown("Telegram response contained an invalid message ID")
+    return TelegramSendResult(provider_message_id=str(message_id))
