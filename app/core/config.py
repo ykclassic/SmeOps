@@ -1,6 +1,7 @@
 import re
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -103,8 +104,18 @@ class Settings(BaseSettings):
         if value is None or not value.strip():
             return None
         normalized = value.strip().rstrip("/")
-        if not normalized.startswith("https://") or len(normalized) > 512:
-            raise ValueError("PUBLIC_API_BASE_URL must be an HTTPS origin or base URL")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+            or len(normalized) > 512
+        ):
+            raise ValueError("PUBLIC_API_BASE_URL must be an HTTPS origin")
         return normalized
 
     @field_validator("openai_model")
