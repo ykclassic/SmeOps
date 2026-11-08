@@ -28,13 +28,16 @@ def upgrade() -> None:
             "FROM telegram_connections WHERE status = 'active'"
         )
     ).mappings().all()
-    if len(rows) != 1 or rows[0]["bot_id"] != EXPECTED_BOT_ID:
+    if rows and (len(rows) != 1 or rows[0]["bot_id"] != EXPECTED_BOT_ID):
         raise RuntimeError(
             "Telegram platform-bot promotion requires exactly one active legacy "
             "connection matching the established SmeOps bot identity."
         )
 
-    row = rows[0]
+    # Empty databases are valid in CI and for a fresh install. The platform bot
+    # remains unconfigured until the operator provisions the centrally managed
+    # credential; production with a legacy bot promotes it below.
+    row = rows[0] if rows else None
     op.create_table(
         "telegram_platform_bots",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -52,21 +55,22 @@ def upgrade() -> None:
         sa.UniqueConstraint("singleton_key", name="uq_telegram_platform_bots_singleton_key"),
         sa.UniqueConstraint("bot_id", name="uq_telegram_platform_bots_bot_id"),
     )
-    bind.execute(
-        sa.text(
-            "INSERT INTO telegram_platform_bots "
-            "(id, singleton_key, bot_id, bot_username, bot_token_encrypted, "
-            "webhook_secret_hash, status) "
-            "VALUES (:id, 'platform', :bot_id, :username, :token, :secret_hash, 'active')"
-        ),
-        {
-            "id": "00000000-0000-0000-0000-000000000015",
-            "bot_id": row["bot_id"],
-            "username": row["bot_username"] or "smeops_bot",
-            "token": row["bot_token_encrypted"],
-            "secret_hash": row["webhook_secret_hash"],
-        },
-    )
+    if row is not None:
+        bind.execute(
+            sa.text(
+                "INSERT INTO telegram_platform_bots "
+                "(id, singleton_key, bot_id, bot_username, bot_token_encrypted, "
+                "webhook_secret_hash, status) "
+                "VALUES (:id, 'platform', :bot_id, :username, :token, :secret_hash, 'active')"
+            ),
+            {
+                "id": "00000000-0000-0000-0000-000000000015",
+                "bot_id": row["bot_id"],
+                "username": row["bot_username"] or "smeops_bot",
+                "token": row["bot_token_encrypted"],
+                "secret_hash": row["webhook_secret_hash"],
+            },
+        )
 
     op.add_column("telegram_webhook_events", sa.Column("bot_id", sa.String(80), nullable=True))
     bind.execute(
