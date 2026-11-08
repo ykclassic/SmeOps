@@ -66,11 +66,11 @@ async def test_inbound_update_persists_chat_identity_and_encrypted_text(monkeypa
     assert len(session.records) == 2
     conversation, message = session.records
     assert conversation.tenant_id == tenant_id
-    assert conversation.telegram_chat_id == "-1001234567890"
+    assert conversation.telegram_chat_id == "1234567890"
     assert conversation.telegram_user_id == "123456"
     assert conversation.customer_name == "Ada Okafor"
     assert message.conversation_id == conversation.id
-    assert message.provider_message_id == "-1001234567890:101"
+    assert message.provider_message_id == "1234567890:101"
     assert message.body_encrypted == "cipher:I need an appointment"
 
 
