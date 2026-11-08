@@ -18,9 +18,9 @@ from app.models import (
     Appointment,
     Customer,
     Service,
-    TelegramPlatformBot,
     TelegramOwnerLink,
     TelegramOwnerNotification,
+    TelegramPlatformBot,
     Tenant,
     User,
 )
