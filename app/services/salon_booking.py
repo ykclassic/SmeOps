@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.models import (
     Appointment,
     AuditEvent,
@@ -18,6 +17,7 @@ from app.models import (
     Tenant,
     User,
 )
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
 SLOT_INTERVAL_MINUTES = 30
 BOOKING_NAMESPACE = UUID("a2a42f47-2ed0-47e6-86cb-1c4ef4b2d129")
