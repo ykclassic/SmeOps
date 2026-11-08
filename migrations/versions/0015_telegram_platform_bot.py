@@ -18,6 +18,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 EXPECTED_BOT_ID = "9016622451"
+EXPECTED_BOT_USERNAME = "smeops_bot"
 
 
 def upgrade() -> None:
@@ -28,7 +29,13 @@ def upgrade() -> None:
             "FROM telegram_connections WHERE status = 'active'"
         )
     ).mappings().all()
-    if rows and (len(rows) != 1 or rows[0]["bot_id"] != EXPECTED_BOT_ID):
+    if rows and (
+        len(rows) != 1
+        or rows[0]["bot_id"] != EXPECTED_BOT_ID
+        or rows[0]["bot_username"] != EXPECTED_BOT_USERNAME
+        or not rows[0]["bot_token_encrypted"]
+        or len(rows[0]["webhook_secret_hash"] or "") != 64
+    ):
         raise RuntimeError(
             "Telegram platform-bot promotion requires exactly one active legacy "
             "connection matching the established SmeOps bot identity."
