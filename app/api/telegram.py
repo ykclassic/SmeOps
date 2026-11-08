@@ -523,8 +523,12 @@ async def get_telegram_booking_link(
     reference = result.scalar_one_or_none()
     if reference is None:
         return {"connected": True, "booking_link": None}
-    # The opaque token is intentionally not recoverable from its stored hash.
-    return {"connected": True, "booking_link": None, "requires_regeneration": True}
+    token = decrypt_telegram_secret(reference.token_encrypted)
+    return {
+        "connected": True,
+        "booking_link": f"https://t.me/{platform_bot.bot_username}?start={token}",
+        "status": "active",
+    }
 
 
 @router.post("/telegram/booking-link")
@@ -554,9 +558,11 @@ async def regenerate_telegram_booking_link(
         reference = TelegramBookingReference(
             tenant_id=user.tenant_id,
             token_hash=token_hash,
+            token_encrypted=encrypt_telegram_secret(token),
         )
     else:
         reference.token_hash = token_hash
+        reference.token_encrypted = encrypt_telegram_secret(token)
         reference.revoked_at = None
     session.add(reference)
     await session.commit()
