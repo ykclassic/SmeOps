@@ -171,7 +171,17 @@ def test_appointment_lifecycle_and_reschedule_validation() -> None:
         )
         assert moved.status_code == 200
         assert moved.json()["rescheduled_at"] is not None
-        assert datetime.fromisoformat(moved.json()["starts_at"]) == moved_start.astimezone(UTC)
+        assert (
+            datetime.fromisoformat(moved.json()["starts_at"])
+            == moved_start.astimezone(ZoneInfo("UTC"))
+        )
+        replayed_move = client.post(
+            f"/appointments/{appointment_id}/reschedule",
+            headers=headers,
+            json={"starts_at": moved_start.isoformat()},
+        )
+        assert replayed_move.status_code == 200
+        assert replayed_move.json()["rescheduled_at"] == moved.json()["rescheduled_at"]
 
         details = client.get(f"/appointments/{appointment_id}", headers=headers)
         assert details.status_code == 200
