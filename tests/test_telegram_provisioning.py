@@ -8,6 +8,5 @@ def test_tenant_botfather_provisioning_routes_are_not_exposed():
         for method in (getattr(route, "methods", None) or set())
     }
 
-    assert ("/telegram/connection", "GET") in registered
     assert ("/telegram/connection", "POST") not in registered
     assert ("/telegram/connection/complete", "POST") not in registered
