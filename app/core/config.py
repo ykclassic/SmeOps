@@ -131,9 +131,15 @@ class Settings(BaseSettings):
     def reject_local_secret_in_deployed_environments(self) -> "Settings":
         if self.app_env in {"staging", "production"}:
             if "app_secret_key" not in self.model_fields_set:
-                raise ValueError("APP_SECRET_KEY must be explicitly configured in staging and production")
+                raise ValueError(
+                    "APP_SECRET_KEY must be explicitly configured "
+                    "in staging and production"
+                )
             if self.app_secret_key.get_secret_value() == LOCAL_SECRET:
-                raise ValueError("APP_SECRET_KEY must not use the local default in staging or production")
+                raise ValueError(
+                    "APP_SECRET_KEY must not use the local default "
+                    "in staging or production"
+                )
         if self.app_env == "production":
             if "localhost" in self.database_url or "127.0.0.1" in self.database_url:
                 raise ValueError("DATABASE_URL must point to a managed production database")
