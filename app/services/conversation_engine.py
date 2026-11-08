@@ -409,7 +409,7 @@ async def process_channel_conversation_job(
                         )
                 elif normalized in NO_WORDS:
                     booking = {}
-                    _, reply = await _service_menu(session, job.tenant_id)
+                    _, reply = await _service_menu(session, job.tenant_id, business_name=tenant.name)
                     if booking == {}:
                         booking["step"] = "awaiting_service"
                 else:
@@ -423,10 +423,10 @@ async def process_channel_conversation_job(
                     and ai_intent.intent == "booking_start"
                 )
             ):
-                _, reply = await _service_menu(session, job.tenant_id)
+                _, reply = await _service_menu(session, job.tenant_id, business_name=tenant.name)
                 booking = {"step": "awaiting_service"}
             elif not step:
-                _, reply = await _service_menu(session, job.tenant_id)
+                _, reply = await _service_menu(session, job.tenant_id, business_name=tenant.name)
                 booking = {"step": "awaiting_service"}
             else:
                 reply = (
