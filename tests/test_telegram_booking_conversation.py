@@ -258,9 +258,7 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         session,
                         tenant_id=tenant_id,
                         service_id=service_id,
-                        day=appointment.starts_at.astimezone().date() + __import__(
-                            "datetime"
-                        ).timedelta(days=0),
+                        day=appointment.starts_at.date(),
                         limit=3,
                     )
                 candidate = next(
