@@ -158,6 +158,8 @@ async def _consume_owner_link(session, *, tenant_id: UUID, payload: dict) -> boo
 
     parts = text_body.split(maxsplit=1)
     token = parts[1].strip() if len(parts) == 2 else ""
+    if token.startswith("book_"):
+        return False
     chat = message.get("chat")
     sender = message.get("from")
     if (
