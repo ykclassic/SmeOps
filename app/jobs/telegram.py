@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.db.session import AsyncSessionFactory
-from app.jobs.queue import ClaimedJob
+from app.jobs.queue import ClaimedJob, enqueue_job
 from app.models import (
     TelegramConversation,
     TelegramConversationMessage,
@@ -27,15 +27,17 @@ def _message_timestamp(value: object) -> datetime:
         return datetime.now(UTC)
 
 
-async def _persist_telegram_message(session, *, tenant_id: UUID, payload: dict) -> None:
+async def _persist_telegram_message(
+    session, *, tenant_id: UUID, payload: dict
+) -> tuple[UUID, UUID] | None:
     message = payload.get("message")
     if not isinstance(message, dict):
-        return
+        return None
 
     chat = message.get("chat")
     sender = message.get("from")
     if not isinstance(chat, dict) or not isinstance(sender, dict):
-        return
+        return None
     chat_id = chat.get("id")
     user_id = sender.get("id")
     message_id = message.get("message_id")
@@ -43,9 +45,17 @@ async def _persist_telegram_message(session, *, tenant_id: UUID, payload: dict) 
            (chat_id, user_id, message_id)):
         return
     if chat_id == 0 or user_id <= 0 or message_id <= 0:
-        return
+        return None
 
     text_body = message.get("text")
+    contact = message.get("contact")
+    if (
+        not isinstance(text_body, str)
+        and isinstance(contact, dict)
+        and contact.get("user_id") == user_id
+        and isinstance(contact.get("phone_number"), str)
+    ):
+        text_body = "contact:" + contact["phone_number"]
     if isinstance(text_body, str) and len(text_body) > 4096:
         text_body = None
     if not isinstance(text_body, str):
@@ -107,7 +117,7 @@ async def _persist_telegram_message(session, *, tenant_id: UUID, payload: dict) 
         )
     )
     if duplicate_result.scalar_one_or_none() is not None:
-        return
+        return None
 
     record = TelegramConversationMessage(
         id=uuid4(),
@@ -124,6 +134,8 @@ async def _persist_telegram_message(session, *, tenant_id: UUID, payload: dict) 
             await session.flush()
     except IntegrityError:
         logger.info("Duplicate Telegram message ignored")
+        return None
+    return conversation.id, record.id
 
 
 async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
@@ -150,11 +162,24 @@ async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
             raise ValueError("Telegram webhook event is not processable")
 
         payload = json.loads(decrypt_telegram_secret(event.payload_encrypted))
-        await _persist_telegram_message(
+        persisted = await _persist_telegram_message(
             session,
             tenant_id=job.tenant_id,
             payload=payload,
         )
+        if persisted is not None:
+            conversation_id, message_id = persisted
+            await enqueue_job(
+                session,
+                tenant_id=job.tenant_id,
+                job_type="telegram.process_conversation",
+                payload={
+                    "conversation_id": str(conversation_id),
+                    "message_id": str(message_id),
+                },
+                idempotency_key=f"tg:conversation:{message_id}",
+                max_attempts=3,
+            )
         event.status = "processed"
         event.processed_at = datetime.now(UTC)
         await session.commit()
