@@ -1,4 +1,3 @@
-import httpx
 import pytest
 
 from app.integrations import telegram_bot
