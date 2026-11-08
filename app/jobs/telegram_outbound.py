@@ -9,6 +9,7 @@ from app.db.session import AsyncSessionFactory
 from app.integrations.telegram_bot import (
     TelegramAPIError,
     TelegramDeliveryUnknown,
+    TelegramSendRejected,
     send_text_message,
 )
 from app.jobs.queue import ClaimedJob
@@ -78,7 +79,7 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
             chat_id=chat_id,
             body=body,
         )
-    except (TelegramAPIError, ValueError):
+    except (TelegramAPIError, TelegramSendRejected, ValueError):
         new_status = "failed"
         error_code = "provider_rejected"
         provider_message_id = None
@@ -89,7 +90,7 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
     else:
         new_status = "sent"
         error_code = None
-        provider_message_id = result.provider_message_id
+        provider_message_id = f"{chat_id}:{result.provider_message_id}"
 
     async with AsyncSessionFactory() as session:
         result = await session.execute(
