@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.telegram import (
     encrypt_telegram_secret,
     verify_telegram_webhook_secret,
+    hash_telegram_webhook_secret,
     decrypt_telegram_secret,
 )
 from app.jobs.queue import enqueue_job
@@ -219,7 +220,10 @@ async def provision_telegram_connection(
 ) -> TelegramConnectionResponse:
     settings = get_settings()
     if settings.whatsapp_token_encryption_key is None:
-        raise HTTPException(status_code=503, detail="Channel token encryption is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Channel token encryption is not configured",
+        )
     if settings.public_api_base_url is None:
         raise HTTPException(status_code=503, detail="PUBLIC_API_BASE_URL is not configured")
 
@@ -250,7 +254,9 @@ async def provision_telegram_connection(
     else:
         connection.bot_username = identity.username
         connection.bot_token_encrypted = encrypt_telegram_secret(token)
-        connection.webhook_secret_hash = hash_telegram_webhook_secret(_telegram_webhook_secret(identity.bot_id))
+        connection.webhook_secret_hash = hash_telegram_webhook_secret(
+            _telegram_webhook_secret(identity.bot_id)
+        )
         connection.status = "pending"
 
     session.add(connection)
@@ -258,12 +264,18 @@ async def provision_telegram_connection(
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=409, detail="This Telegram bot is already connected to another workspace") from None
+        raise HTTPException(
+            status_code=409,
+            detail="This Telegram bot is already connected to another workspace",
+        ) from None
 
     try:
         await _register_connection_webhook(connection)
     except (TelegramAPIError, TelegramDeliveryUnknown, ValueError, HTTPException):
-        logger.warning("Telegram webhook registration remains pending", extra={"bot_id": identity.bot_id})
+        logger.warning(
+            "Telegram webhook registration remains pending",
+            extra={"bot_id": identity.bot_id},
+        )
         return TelegramConnectionResponse(
             bot_id=connection.bot_id,
             bot_username=connection.bot_username,
@@ -297,7 +309,10 @@ async def complete_telegram_connection(
 ) -> TelegramConnectionResponse:
     result = await session.execute(
         select(TelegramConnection)
-        .where(TelegramConnection.tenant_id == user.tenant_id, TelegramConnection.status == "pending")
+        .where(
+            TelegramConnection.tenant_id == user.tenant_id,
+            TelegramConnection.status == "pending",
+        )
         .with_for_update()
     )
     connection = result.scalar_one_or_none()
@@ -307,7 +322,10 @@ async def complete_telegram_connection(
         await _register_connection_webhook(connection)
     except (TelegramAPIError, TelegramDeliveryUnknown, ValueError, HTTPException):
         await session.rollback()
-        raise HTTPException(status_code=502, detail="Telegram webhook registration is still pending") from None
+        raise HTTPException(
+            status_code=502,
+            detail="Telegram webhook registration is still pending",
+        ) from None
     connection.status = "active"
     await session.commit()
     return TelegramConnectionResponse(
@@ -355,7 +373,10 @@ async def queue_telegram_text_message(
             actor_user_id=user.id,
         )
     except TelegramOutboundIdempotencyConflict:
-        raise HTTPException(status_code=409, detail="Idempotency key was used for different content") from None
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key was used for different content",
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return TelegramOutboundMessageResponse(id=message.id, status=message.status)
