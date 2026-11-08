@@ -66,7 +66,7 @@ class TelegramWebhookEvent(UUIDPrimaryKey, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
-    bot_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    bot_id: Mapped[str] = mapped_column(String(80), nullable=False, default="901662451")
     provider_update_id: Mapped[str] = mapped_column(String(80), nullable=False)
     event_type: Mapped[str] = mapped_column(String(80), nullable=False)
     payload_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
@@ -188,7 +188,9 @@ class TelegramPlatformBot(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "telegram_platform_bots"
     __table_args__ = (
         UniqueConstraint("bot_id", name="uq_telegram_platform_bots_bot_id"),
+        UniqueConstraint("singleton_key", name="uq_telegram_platform_bots_singleton_key"),
         CheckConstraint("singleton_key = 'platform'", name="telegram_platform_bot_singleton"),
+        CheckConstraint("status IN ('active', 'disabled')", name="telegram_platform_bot_status"),
     )
 
     singleton_key: Mapped[str] = mapped_column(
