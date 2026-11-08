@@ -118,22 +118,28 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             platform_bot_id = uuid4()
             async def seed_platform_bot():
                 async with AsyncSessionFactory() as session:
-                    session.add(
-                        TelegramPlatformBot(
-                            id=platform_bot_id,
-                            singleton_key="platform",
-                            bot_id="9016622451",
-                            bot_username="smeops_bot",
-                            bot_token_encrypted=encrypt_telegram_secret(
-                                "123456:telegram-test-token"
-                            ),
-                            webhook_secret_hash=hash_telegram_webhook_secret(
-                                telegram_api._telegram_webhook_secret("9016622451")
-                            ),
-                            status="active",
+                    existing = await session.execute(
+                        select(TelegramPlatformBot).where(
+                            TelegramPlatformBot.singleton_key == "platform"
                         )
                     )
-                    await session.commit()
+                    if existing.scalar_one_or_none() is None:
+                        session.add(
+                            TelegramPlatformBot(
+                                id=platform_bot_id,
+                                singleton_key="platform",
+                                bot_id="9016622451",
+                                bot_username="smeops_bot",
+                                bot_token_encrypted=encrypt_telegram_secret(
+                                    "123456:telegram-test-token"
+                                ),
+                                webhook_secret_hash=hash_telegram_webhook_secret(
+                                    telegram_api._telegram_webhook_secret("9016622451")
+                                ),
+                                status="active",
+                            )
+                        )
+                        await session.commit()
 
             asyncio.run(seed_platform_bot())
 
