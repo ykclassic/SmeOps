@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs.queue import enqueue_job
-from app.models import TelegramOwnerLink, TelegramOwnerNotification
+from app.models import TelegramOwnerLink, TelegramOwnerNotification, User
 
 
 async def enqueue_appointment_owner_alerts(
@@ -15,7 +15,15 @@ async def enqueue_appointment_owner_alerts(
 ) -> int:
     """Queue one durable, tenant-scoped alert for each linked active owner."""
     links_result = await session.execute(
-        select(TelegramOwnerLink).where(
+        select(TelegramOwnerLink)
+        .join(
+            User,
+            (User.id == TelegramOwnerLink.owner_user_id)
+            & (User.tenant_id == TelegramOwnerLink.tenant_id),
+        )
+        .where(
+            User.status == "active",
+            User.role == "owner",
             TelegramOwnerLink.tenant_id == tenant_id,
             TelegramOwnerLink.linked_at.is_not(None),
             TelegramOwnerLink.disabled_at.is_(None),
