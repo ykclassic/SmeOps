@@ -122,23 +122,42 @@ def test_appointment_lifecycle_and_reschedule_validation() -> None:
     with TestClient(app) as client:
         token = _register(client, slug, f"{slug}@example.com")
         headers = {"Authorization": f"Bearer {token}"}
-        service = client.post("/services", headers=headers, json={
-            "name": "Lifecycle service", "duration_minutes": 60, "price_minor": 2500000,
-        })
+        service = client.post(
+            "/services",
+            headers=headers,
+            json={
+                "name": "Lifecycle service",
+                "duration_minutes": 60,
+                "price_minor": 2500000,
+            },
+        )
         assert service.status_code == 201
         service_id = service.json()["id"]
-        hours = client.put("/business-hours", headers=headers, json={"days": [
-            {"weekday": day, "is_closed": False, "opens_at": "08:00:00", "closes_at": "18:00:00"}
-            for day in range(7)
-        ]})
+        hours = client.put(
+            "/business-hours",
+            headers=headers,
+            json={
+                "days": [
+                    {
+                        "weekday": day,
+                        "is_closed": False,
+                        "opens_at": "08:00:00",
+                        "closes_at": "18:00:00",
+                    }
+                    for day in range(7)
+                ]
+            },
+        )
         assert hours.status_code == 200
         local_now = datetime.now(ZoneInfo("Africa/Lagos"))
         first_start = (local_now + timedelta(days=3)).replace(
             hour=10, minute=0, second=0, microsecond=0
         )
         payload = {
-            "idempotency_key": str(uuid4()), "service_id": service_id,
-            "customer_name": "Lifecycle Customer", "customer_phone": "+2348012345679",
+            "idempotency_key": str(uuid4()),
+            "service_id": service_id,
+            "customer_name": "Lifecycle Customer",
+            "customer_phone": "+2348012345679",
             "starts_at": first_start.isoformat(),
         }
         created = client.post("/appointments", headers=headers, json=payload)
@@ -160,7 +179,13 @@ def test_appointment_lifecycle_and_reschedule_validation() -> None:
         assert completed.status_code == 200
         assert completed.json()["status"] == "completed"
         assert completed.json()["completed_at"] is not None
-        assert client.post(f"/appointments/{appointment_id}/missed", headers=headers).status_code == 409
+        assert (
+            client.post(
+                f"/appointments/{appointment_id}/missed",
+                headers=headers,
+            ).status_code
+            == 409
+        )
 
         missed_payload = dict(payload)
         missed_payload["idempotency_key"] = str(uuid4())
