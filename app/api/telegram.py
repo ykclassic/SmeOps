@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import json
 import logging
 import secrets
@@ -12,17 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import DbSession, require_roles
-from app.core.config import get_settings
 from app.core.telegram import (
     decrypt_telegram_secret,
     encrypt_telegram_secret,
     verify_telegram_webhook_secret,
-)
-from app.integrations.telegram_bot import (
-    TelegramAPIError,
-    TelegramDeliveryUnknown,
-    get_bot_identity,
-    register_webhook,
 )
 from app.jobs.queue import enqueue_job
 from app.models import (
@@ -43,6 +35,10 @@ from app.services.telegram_outbound import (
     TelegramOutboundIdempotencyConflict,
     enqueue_telegram_text,
 )
+from app.services.telegram_webhook import (
+    ensure_platform_webhook,
+    platform_webhook_secret,
+)
 
 router = APIRouter(tags=["telegram integration"])
 logger = logging.getLogger(__name__)
@@ -52,28 +48,18 @@ MAX_TELEGRAM_WEBHOOK_BYTES = 1_000_000
 
 
 async def _ensure_platform_webhook(platform_bot: TelegramPlatformBot) -> None:
-    settings = get_settings()
-    if settings.public_api_base_url is None:
-        raise HTTPException(status_code=503, detail="PUBLIC_API_BASE_URL is not configured")
-    token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
     try:
-        identity = await get_bot_identity(bot_token=token)
-        if identity.bot_id != platform_bot.bot_id or identity.username != platform_bot.bot_username:
-            raise ValueError("Platform Telegram bot identity mismatch")
-        await register_webhook(
-            bot_token=token,
-            webhook_url=f"{settings.public_api_base_url}/webhooks/telegram/platform",
-            secret_token=_telegram_webhook_secret(platform_bot.bot_id),
-        )
-    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError) as exc:
+        await ensure_platform_webhook(platform_bot)
+    except (RuntimeError, ValueError) as exc:
         logger.warning(
-            "Shared Telegram webhook registration failed",
+            "Shared Telegram webhook activation failed",
             extra={"error_type": type(exc).__name__},
         )
         raise HTTPException(
             status_code=503,
             detail="SmeOps Telegram connection could not be activated",
         ) from None
+
 
 @router.post("/webhooks/telegram/platform", status_code=status.HTTP_200_OK)
 async def receive_platform_telegram_webhook(
@@ -402,12 +388,7 @@ async def receive_telegram_webhook(
 
 
 def _telegram_webhook_secret(bot_id: str) -> str:
-    key = get_settings().app_secret_key.get_secret_value().encode()
-    return hmac.new(
-        key,
-        f"smeops:telegram:webhook:{bot_id}".encode(),
-        hashlib.sha256,
-    ).hexdigest()
+    return platform_webhook_secret(bot_id)
 
 
 @router.get("/telegram/connection", response_model=TelegramConnectionResponse | None)

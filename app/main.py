@@ -13,6 +13,7 @@ from app.api.telegram import router as telegram_router
 from app.api.whatsapp import router as whatsapp_router
 from app.core.config import get_settings
 from app.db.session import engine
+from app.services.telegram_webhook import reconcile_platform_webhook_on_startup
 from app.worker import run_embedded_worker
 
 settings = get_settings()
@@ -30,6 +31,7 @@ async def lifespan(_: FastAPI):
     # Tests deliberately run without a competing background consumer. Staging and
     # production run one worker inside the API process to avoid a paid Render worker.
     if settings.app_env in {"staging", "production"}:
+        await reconcile_platform_webhook_on_startup()
         worker_task = asyncio.create_task(
             run_embedded_worker(stop_event),
             name="smeops-embedded-worker",

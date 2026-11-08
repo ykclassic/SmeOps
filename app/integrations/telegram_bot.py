@@ -11,6 +11,14 @@ class TelegramBotIdentity:
 
 
 @dataclass(frozen=True)
+class TelegramWebhookInfo:
+    url: str
+    pending_update_count: int
+    last_error_date: int | None
+    last_error_message: str | None
+
+
+@dataclass(frozen=True)
 class TelegramSendResult:
     provider_message_id: str
 
@@ -57,13 +65,7 @@ async def _call_bot_api(
     if response.status_code >= 500 or response.status_code < 200:
         raise TelegramDeliveryUnknown("Telegram API outcome is unknown")
     if not isinstance(data, dict) or data.get("ok") is not True:
-        description = data.get("description") if isinstance(data, dict) else None
-        # Do not expose provider descriptions; they can contain sensitive details.
-        raise TelegramAPIError(
-            "Telegram API request was rejected"
-            if not description
-            else "Telegram API request was rejected"
-        )
+        raise TelegramAPIError("Telegram API request was rejected")
     result = data.get("result")
     if isinstance(result, dict):
         return result
@@ -83,6 +85,37 @@ async def get_bot_identity(*, bot_token: str) -> TelegramBotIdentity:
     ):
         raise TelegramAPIError("Telegram getMe returned an invalid bot username")
     return TelegramBotIdentity(bot_id=str(bot_id), username=username)
+
+
+async def get_webhook_info(*, bot_token: str) -> TelegramWebhookInfo:
+    result = await _call_bot_api(
+        bot_token=bot_token,
+        method="getWebhookInfo",
+        payload={},
+    )
+    url = result.get("url", "")
+    pending = result.get("pending_update_count", 0)
+    last_error_date = result.get("last_error_date")
+    last_error_message = result.get("last_error_message")
+    if (
+        not isinstance(url, str)
+        or isinstance(pending, bool)
+        or not isinstance(pending, int)
+        or pending < 0
+    ):
+        raise TelegramAPIError("Telegram returned invalid webhook diagnostics")
+    if last_error_date is not None and (
+        isinstance(last_error_date, bool) or not isinstance(last_error_date, int)
+    ):
+        raise TelegramAPIError("Telegram returned invalid webhook error timestamp")
+    if last_error_message is not None and not isinstance(last_error_message, str):
+        raise TelegramAPIError("Telegram returned invalid webhook error diagnostics")
+    return TelegramWebhookInfo(
+        url=url,
+        pending_update_count=pending,
+        last_error_date=last_error_date,
+        last_error_message=last_error_message,
+    )
 
 
 async def register_webhook(
