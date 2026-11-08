@@ -32,6 +32,7 @@ from app.models import (
     TelegramOwnerLink,
     TelegramPlatformBot,
     TelegramBookingReference,
+    TelegramChatContext,
     TelegramWebhookEvent,
     User,
 )
@@ -155,6 +156,7 @@ async def receive_telegram_webhook(
     event = TelegramWebhookEvent(
         id=uuid4(),
         tenant_id=connection.tenant_id,
+        bot_id=connection.bot_id,
         provider_update_id=provider_update_id,
         event_type="message.received" if isinstance(payload.get("message"), dict) else "update",
         payload_encrypted=encrypt_telegram_secret(canonical_payload),
@@ -192,6 +194,178 @@ async def receive_telegram_webhook(
     return {"status": "accepted", "queued_events": 1}
 
 
+
+
+@router.post("/webhooks/telegram/platform", status_code=status.HTTP_200_OK)
+async def receive_platform_telegram_webhook(
+    request: Request,
+    session: DbSession,
+    secret_token: str | None = Header(
+        default=None,
+        alias="X-Telegram-Bot-Api-Secret-Token",
+    ),
+) -> dict[str, int | str]:
+    platform_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
+        )
+    )
+    platform_bot = platform_result.scalar_one_or_none()
+    if platform_bot is None:
+        raise HTTPException(status_code=404, detail="Platform Telegram bot is not configured")
+    if not verify_telegram_webhook_secret(secret_token or "", platform_bot.webhook_secret_hash):
+        raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > MAX_TELEGRAM_WEBHOOK_BYTES:
+                raise HTTPException(status_code=413, detail="Webhook too large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid content length") from None
+    body_buffer = bytearray()
+    async for chunk in request.stream():
+        body_buffer.extend(chunk)
+        if len(body_buffer) > MAX_TELEGRAM_WEBHOOK_BYTES:
+            raise HTTPException(status_code=413, detail="Webhook too large")
+    try:
+        payload = json.loads(bytes(body_buffer))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Unsupported Telegram update")
+    update_id = payload.get("update_id")
+    if isinstance(update_id, bool) or not isinstance(update_id, int) or update_id < 0:
+        raise HTTPException(status_code=400, detail="Telegram update ID is invalid")
+
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return {"status": "accepted", "queued_events": 0}
+    chat = message.get("chat")
+    sender = message.get("from")
+    if (
+        not isinstance(chat, dict)
+        or chat.get("type") != "private"
+        or not isinstance(sender, dict)
+        or sender.get("is_bot") is True
+    ):
+        return {"status": "accepted", "queued_events": 0}
+    chat_id, sender_id = chat.get("id"), sender.get("id")
+    if (
+        isinstance(chat_id, bool)
+        or not isinstance(chat_id, int)
+        or isinstance(sender_id, bool)
+        or not isinstance(sender_id, int)
+        or chat_id <= 0
+        or sender_id <= 0
+        or chat_id != sender_id
+    ):
+        return {"status": "accepted", "queued_events": 0}
+
+    tenant_id = None
+    text_body = message.get("text")
+    token = ""
+    if isinstance(text_body, str) and (text_body == "/start" or text_body.startswith("/start ")):
+        parts = text_body.split(maxsplit=1)
+        token = parts[1].strip() if len(parts) == 2 else ""
+    if token and len(token) <= 64:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        owner_result = await session.execute(
+            select(TelegramOwnerLink).where(
+                TelegramOwnerLink.invitation_hash == token_hash,
+                TelegramOwnerLink.expires_at > datetime.now(UTC),
+                TelegramOwnerLink.linked_at.is_(None),
+                TelegramOwnerLink.disabled_at.is_(None),
+            )
+        )
+        owner_link = owner_result.scalar_one_or_none()
+        if owner_link is not None:
+            tenant_id = owner_link.tenant_id
+        else:
+            booking_result = await session.execute(
+                select(TelegramBookingReference).where(
+                    TelegramBookingReference.token_hash == token_hash,
+                    TelegramBookingReference.revoked_at.is_(None),
+                )
+            )
+            booking_ref = booking_result.scalar_one_or_none()
+            if booking_ref is not None:
+                tenant_id = booking_ref.tenant_id
+                context_result = await session.execute(
+                    select(TelegramChatContext).where(
+                        TelegramChatContext.platform_bot_id == platform_bot.id,
+                        TelegramChatContext.telegram_chat_id == str(chat_id),
+                    ).with_for_update()
+                )
+                chat_context = context_result.scalar_one_or_none()
+                if chat_context is None:
+                    chat_context = TelegramChatContext(
+                        platform_bot_id=platform_bot.id,
+                        tenant_id=tenant_id,
+                        telegram_user_id=str(sender_id),
+                        telegram_chat_id=str(chat_id),
+                    )
+                else:
+                    chat_context.tenant_id = tenant_id
+                    chat_context.telegram_user_id = str(sender_id)
+                    chat_context.selected_at = datetime.now(UTC)
+                session.add(chat_context)
+    if tenant_id is None:
+        context_result = await session.execute(
+            select(TelegramChatContext).where(
+                TelegramChatContext.platform_bot_id == platform_bot.id,
+                TelegramChatContext.telegram_chat_id == str(chat_id),
+                TelegramChatContext.telegram_user_id == str(sender_id),
+            )
+        )
+        chat_context = context_result.scalar_one_or_none()
+        tenant_id = chat_context.tenant_id if chat_context is not None else None
+    if tenant_id is None:
+        # No default tenant is ever selected. The user must open a valid business link.
+        return {"status": "accepted", "queued_events": 0}
+
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    payload_hash = hashlib.sha256(canonical_payload.encode()).hexdigest()
+    provider_update_id = str(update_id)
+    duplicate_result = await session.execute(
+        select(TelegramWebhookEvent).where(
+            TelegramWebhookEvent.bot_id == platform_bot.bot_id,
+            TelegramWebhookEvent.provider_update_id == provider_update_id,
+        )
+    )
+    duplicate = duplicate_result.scalar_one_or_none()
+    if duplicate is not None:
+        if duplicate.payload_sha256 != payload_hash:
+            logger.warning("Telegram platform duplicate update payload hash mismatch")
+        return {"status": "accepted", "queued_events": 0}
+
+    event = TelegramWebhookEvent(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        bot_id=platform_bot.bot_id,
+        provider_update_id=provider_update_id,
+        event_type="message.received",
+        payload_encrypted=encrypt_telegram_secret(canonical_payload),
+        payload_sha256=payload_hash,
+        status="queued",
+    )
+    try:
+        async with session.begin_nested():
+            session.add(event)
+            await session.flush()
+    except IntegrityError:
+        return {"status": "accepted", "queued_events": 0}
+    await enqueue_job(
+        session,
+        tenant_id=tenant_id,
+        job_type="telegram.accept_inbound",
+        payload={"webhook_event_id": str(event.id)},
+        idempotency_key=f"tg:platform:{platform_bot.bot_id}:{provider_update_id}",
+        max_attempts=3,
+    )
+    await session.commit()
+    return {"status": "accepted", "queued_events": 1}
 
 def _telegram_webhook_secret(bot_id: str) -> str:
     key = get_settings().app_secret_key.get_secret_value().encode()
