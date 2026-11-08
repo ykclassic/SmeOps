@@ -53,6 +53,28 @@ OwnerOnly = Annotated[User, Depends(require_roles("owner"))]
 MAX_TELEGRAM_WEBHOOK_BYTES = 1_000_000
 
 
+
+async def _ensure_platform_webhook(platform_bot: TelegramPlatformBot) -> None:
+    settings = get_settings()
+    if settings.public_api_base_url is None:
+        raise HTTPException(status_code=503, detail="PUBLIC_API_BASE_URL is not configured")
+    token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
+    try:
+        identity = await get_bot_identity(bot_token=token)
+        if identity.bot_id != platform_bot.bot_id or identity.username != platform_bot.bot_username:
+            raise ValueError("Platform Telegram bot identity mismatch")
+        await register_webhook(
+            bot_token=token,
+            webhook_url=f"{settings.public_api_base_url}/webhooks/telegram/platform",
+            secret_token=_telegram_webhook_secret(platform_bot.bot_id),
+        )
+    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError):
+        logger.exception("Shared Telegram webhook registration failed")
+        raise HTTPException(
+            status_code=503,
+            detail="SmeOps Telegram connection could not be activated",
+        ) from None
+
 @router.post("/webhooks/telegram/{bot_id}", status_code=status.HTTP_200_OK)
 async def receive_telegram_webhook(
     bot_id: str,
@@ -583,6 +605,7 @@ async def create_telegram_owner_link(
     platform_bot = platform_result.scalar_one_or_none()
     if platform_bot is None:
         raise HTTPException(status_code=503, detail="SmeOps Telegram is temporarily unavailable")
+    await _ensure_platform_webhook(platform_bot)
 
     result = await session.execute(
         select(TelegramOwnerLink)
@@ -719,6 +742,7 @@ async def regenerate_telegram_booking_link(
     platform_bot = platform_result.scalar_one_or_none()
     if platform_bot is None:
         raise HTTPException(status_code=503, detail="SmeOps Telegram is temporarily unavailable")
+    await _ensure_platform_webhook(platform_bot)
 
     result = await session.execute(
         select(TelegramBookingReference)
