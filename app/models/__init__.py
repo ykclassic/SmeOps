@@ -4,6 +4,9 @@ from app.models.jobs import BackgroundJob
 from app.models.retail import Order, OrderItem, Product
 from app.models.telegram import (
     TelegramConnection,
+    TelegramPlatformBot,
+    TelegramBookingReference,
+    TelegramChatContext,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
@@ -33,6 +36,9 @@ __all__ = [
     "Service",
     "Tenant",
     "TelegramConnection",
+    "TelegramPlatformBot",
+    "TelegramBookingReference",
+    "TelegramChatContext",
     "TelegramOwnerLink",
     "TelegramOwnerNotification",
     "TelegramConversation",
