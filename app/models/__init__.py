@@ -6,10 +6,10 @@ from app.models.telegram import (
     TelegramBookingReference,
     TelegramChatContext,
     TelegramConnection,
-    TelegramPlatformBot,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramPlatformBot,
     TelegramWebhookEvent,
 )
 from app.models.telegram_owner import TelegramOwnerLink, TelegramOwnerNotification
