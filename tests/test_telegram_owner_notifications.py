@@ -292,3 +292,104 @@ async def test_owner_notification_worker_sends_reference_and_local_booking_detai
     assert notification.status == "sent"
     assert notification.provider_message_id == "998877:telegram-message-123"
     assert notification.sent_at is not None
+
+
+@pytest.mark.asyncio
+async def test_shared_platform_bot_delivers_each_tenant_alert_to_its_own_owner(monkeypatch):
+    from app.jobs import telegram_owner_notifications as notification_jobs
+    from app.jobs.queue import ClaimedJob
+
+    shared_bot = SimpleNamespace(bot_token_encrypted="cipher:shared-platform-token")
+    sessions = []
+    expected = []
+    for business_name, chat_id in (("Salon A", "111001"), ("Salon B", "222002")):
+        tenant_id = uuid4()
+        owner_id = uuid4()
+        appointment_id = uuid4()
+        notification = SimpleNamespace(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            owner_user_id=owner_id,
+            appointment_id=appointment_id,
+            status="queued",
+            provider_message_id=None,
+            last_error_code=None,
+            sent_at=None,
+        )
+        link = SimpleNamespace(chat_id=chat_id)
+        appointment = SimpleNamespace(
+            id=appointment_id,
+            starts_at=datetime(2026, 11, 9, 9, 0, tzinfo=UTC),
+            status="confirmed",
+        )
+        service = SimpleNamespace(name=f"{business_name} Service")
+        customer = SimpleNamespace(name=f"{business_name} Customer")
+        tenant = SimpleNamespace(
+            name=business_name,
+            business_timezone="Africa/Lagos",
+        )
+        sessions.extend(
+            [
+                Session(
+                    [notification, link, shared_bot, (appointment, service, customer, tenant)]
+                ),
+                Session([notification]),
+            ]
+        )
+        expected.append((notification, chat_id, business_name, appointment_id))
+
+    class Context:
+        def __init__(self, session):
+            self.session = session
+
+        async def __aenter__(self):
+            return self.session
+
+        async def __aexit__(self, *_args):
+            return False
+
+    sent_messages = []
+
+    async def fake_send(*, bot_token, chat_id, body):
+        sent_messages.append((bot_token, chat_id, body))
+        return SimpleNamespace(provider_message_id=f"message-{chat_id}")
+
+    session_iterator = iter(sessions)
+    monkeypatch.setattr(
+        notification_jobs,
+        "AsyncSessionFactory",
+        lambda: Context(next(session_iterator)),
+    )
+    monkeypatch.setattr(
+        notification_jobs,
+        "decrypt_telegram_secret",
+        lambda value: value.removeprefix("cipher:"),
+    )
+    monkeypatch.setattr(notification_jobs, "send_text_message", fake_send)
+
+    for notification, _chat_id, _business_name, _appointment_id in expected:
+        await notification_jobs.send_owner_appointment_alert_job(
+            ClaimedJob(
+                id=uuid4(),
+                tenant_id=notification.tenant_id,
+                job_type="telegram.owner_appointment_alert",
+                payload={"notification_id": str(notification.id)},
+                attempts=1,
+                max_attempts=3,
+            )
+        )
+
+    assert len(sent_messages) == 2
+    for (bot_token, chat_id, body), (
+        notification,
+        expected_chat_id,
+        business_name,
+        appointment_id,
+    ) in zip(sent_messages, expected, strict=True):
+        assert bot_token == "shared-platform-token"
+        assert chat_id == expected_chat_id
+        assert f"Business: {business_name}" in body
+        assert (
+            "Reference: " + str(appointment_id).replace("-", "")[:8].upper()
+        ) in body
+        assert notification.status == "sent"
