@@ -22,6 +22,7 @@ from app.models import (
     TelegramOwnerLink,
     TelegramOwnerNotification,
     Tenant,
+    User,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,15 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
             raise ValueError("Owner notification is not sendable")
 
         link_result = await session.execute(
-            select(TelegramOwnerLink).where(
+            select(TelegramOwnerLink)
+            .join(
+                User,
+                (User.id == TelegramOwnerLink.owner_user_id)
+                & (User.tenant_id == TelegramOwnerLink.tenant_id),
+            )
+            .where(
+                User.status == "active",
+                User.role == "owner",
                 TelegramOwnerLink.tenant_id == job.tenant_id,
                 TelegramOwnerLink.owner_user_id == notification.owner_user_id,
                 TelegramOwnerLink.linked_at.is_not(None),
