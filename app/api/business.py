@@ -507,7 +507,10 @@ async def reschedule_appointment(
     tenant = await _lock_tenant(session, user.tenant_id)
     appointment, customer = await _get_locked_appointment(session, tenant.id, appointment_id)
     if appointment.status != "confirmed":
-        raise HTTPException(status_code=409, detail="Only confirmed appointments can be rescheduled")
+        raise HTTPException(
+            status_code=409,
+            detail="Only confirmed appointments can be rescheduled",
+        )
 
     new_start = payload.starts_at.astimezone(UTC)
     if new_start == appointment.starts_at:
