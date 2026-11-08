@@ -14,9 +14,9 @@ from app.integrations.telegram_bot import (
 )
 from app.jobs.queue import ClaimedJob
 from app.models import (
-    TelegramPlatformBot,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramPlatformBot,
 )
 
 logger = logging.getLogger(__name__)
