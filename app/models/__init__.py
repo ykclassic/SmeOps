@@ -3,10 +3,10 @@ from app.models.business import Appointment, AuditEvent, BusinessHours, Customer
 from app.models.jobs import BackgroundJob
 from app.models.retail import Order, OrderItem, Product
 from app.models.telegram import (
-    TelegramConnection,
-    TelegramPlatformBot,
     TelegramBookingReference,
     TelegramChatContext,
+    TelegramConnection,
+    TelegramPlatformBot,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
