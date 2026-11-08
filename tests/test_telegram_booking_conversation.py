@@ -25,7 +25,7 @@ from app.services.salon_booking import (
     create_appointment_booking,
     get_available_slots,
 )
-from app.services.whatsapp_conversation import process_telegram_conversation_job
+from app.services.conversation_engine import process_telegram_conversation_job
 
 
 @pytest.mark.parametrize("phone_input, expected_phone", [
