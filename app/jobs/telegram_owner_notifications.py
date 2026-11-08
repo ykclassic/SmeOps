@@ -74,8 +74,16 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
         connection = connection_result.scalar_one_or_none()
         appointment_result = await session.execute(
             select(Appointment, Service, Customer, Tenant)
-            .join(Service, (Service.id == Appointment.service_id) & (Service.tenant_id == Appointment.tenant_id))
-            .join(Customer, (Customer.id == Appointment.customer_id) & (Customer.tenant_id == Appointment.tenant_id))
+            .join(
+                Service,
+                (Service.id == Appointment.service_id)
+                & (Service.tenant_id == Appointment.tenant_id),
+            )
+            .join(
+                Customer,
+                (Customer.id == Appointment.customer_id)
+                & (Customer.tenant_id == Appointment.tenant_id),
+            )
             .join(Tenant, Tenant.id == Appointment.tenant_id)
             .where(
                 Appointment.id == notification.appointment_id,
