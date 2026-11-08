@@ -55,7 +55,9 @@ type Connection = {
   onboarding_error_code?: string | null;
 } | null;
 
-type Tab = "overview" | "appointments" | "inbox" | "services" | "hours" | "whatsapp";
+type TelegramOwnerStatus = { linked: boolean; status: string; linked_at?: string | null };
+type TelegramBookingStatus = { connected: boolean; booking_link: string | null; status?: string };
+type Tab = "overview" | "appointments" | "inbox" | "services" | "hours" | "whatsapp" | "telegram";
 
 type FacebookLoginResponse = {
   authResponse?: { code?: string };
@@ -145,6 +147,9 @@ export default function HomePage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [connection, setConnection] = useState<Connection>(null);
+  const [telegramOwner, setTelegramOwner] = useState<TelegramOwnerStatus>({ linked: false, status: "disconnected" });
+  const [telegramBooking, setTelegramBooking] = useState<TelegramBookingStatus>({ connected: false, booking_link: null });
+  const [telegramOwnerDeepLink, setTelegramOwnerDeepLink] = useState<string | null>(null);
   const [signupPin, setSignupPin] = useState("");
   const signupPinRef = useRef("");
   const signupPartsRef = useRef<{
@@ -313,6 +318,12 @@ export default function HomePage() {
     );
     setConversations(conversationData);
     setConnection(connectionData);
+    const [ownerStatus, bookingStatus] = await Promise.all([
+      api<TelegramOwnerStatus>("telegram/owner-link").catch(() => ({ linked: false, status: "unavailable" })),
+      api<TelegramBookingStatus>("telegram/booking-link").catch(() => ({ connected: false, booking_link: null })),
+    ]);
+    setTelegramOwner(ownerStatus);
+    setTelegramBooking(bookingStatus);
     if (conversationData.length > 0) {
       const selected =
         activeConversation && conversationData.some((item) => item.id === activeConversation)
@@ -449,6 +460,25 @@ export default function HomePage() {
   }, [user, connection?.status]);
 
   useEffect(() => {
+    if (!user || telegramOwner.status !== "pending") return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      const current = await api<TelegramOwnerStatus>("telegram/owner-link").catch(() => null);
+      if (!active || !current) return;
+      setTelegramOwner(current);
+      if (current.linked) {
+        setTelegramOwnerDeepLink(null);
+        setNotice("Telegram owner alerts are connected.");
+        window.clearInterval(timer);
+      }
+    }, 4000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [user, telegramOwner.status]);
+
+  useEffect(() => {
     let mounted = true;
     api<User>("auth/me")
       .then((identity) => {
@@ -517,6 +547,54 @@ export default function HomePage() {
     }
   }
 
+  async function connectTelegramOwner() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<TelegramOwnerStatus & { deep_link?: string }>("telegram/owner-link", { method: "POST", body: "{}" });
+      setTelegramOwner(result);
+      if (result.deep_link) {
+        setTelegramOwnerDeepLink(result.deep_link);
+        setNotice("Open the Telegram link below and press Start in the SmeOps bot to finish linking.");
+      } else if (result.linked) {
+        setNotice("Telegram owner alerts are already connected.");
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not start Telegram connection");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnectTelegramOwner() {
+    if (!window.confirm("Stop Telegram appointment alerts for this workspace?")) return;
+    setBusy(true);
+    try {
+      await api("telegram/owner-link", { method: "DELETE" });
+      setTelegramOwner({ linked: false, status: "disconnected" });
+      setTelegramOwnerDeepLink(null);
+      setNotice("Telegram owner alerts disconnected.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not disconnect Telegram");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createTelegramBookingLink() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<TelegramBookingStatus>("telegram/booking-link", { method: "POST", body: "{}" });
+      setTelegramBooking(result);
+      setNotice("Customer booking link is ready to copy and share.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not create booking link");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function logout() {
     await api("auth/logout", { method: "POST" }).catch(() => undefined);
     setUser(null);
@@ -525,6 +603,9 @@ export default function HomePage() {
     setConversations([]);
     setMessages([]);
     setConnection(null);
+    setTelegramOwner({ linked: false, status: "disconnected" });
+    setTelegramOwnerDeepLink(null);
+    setTelegramBooking({ connected: false, booking_link: null });
   }
 
   async function refresh() {
@@ -671,6 +752,7 @@ export default function HomePage() {
     { id: "services", label: "Services", icon: "✳" },
     { id: "hours", label: "Opening hours", icon: "◷" },
     { id: "whatsapp", label: "WhatsApp setup", icon: "↗" },
+    { id: "telegram", label: "Telegram integration", icon: "➤" },
   ];
 
   return (
@@ -801,6 +883,42 @@ export default function HomePage() {
                 </div>)}
                 <div className="hours-footer"><span className="muted">Times are interpreted in Africa/Lagos unless your workspace timezone is changed.</span><button className="button button-primary" disabled={busy}>Save opening hours</button></div>
               </form></section>
+            </>
+          )}
+
+
+          {tab === "telegram" && (
+            <>
+              <div className="page-heading"><div><span className="eyebrow">SHARED PLATFORM BOT</span><h1>Telegram integration</h1><p>Connect your owner account and share a dedicated booking link with customers.</p></div></div>
+              <div className="content-grid">
+                <section className="panel whatsapp-panel">
+                  <div className="whatsapp-illustration">➤</div>
+                  <div className="whatsapp-copy">
+                    <span className={telegramOwner.linked ? "pill pill-green" : "pill pill-amber"}>{telegramOwner.linked ? "Connected" : telegramOwner.status === "pending" ? "Linking" : "Not connected"}</span>
+                    <h2>Owner appointment alerts</h2>
+                    <p>Use the SmeOps platform bot. No BotFather setup or bot token is required. After opening Telegram, press Start to link this owner account.</p>
+                    {telegramOwner.linked
+                      ? <><p className="muted">Linked {telegramOwner.linked_at ? dateTime(telegramOwner.linked_at) : "successfully"}.</p><button className="button button-danger-quiet" onClick={disconnectTelegramOwner} disabled={busy}>Disconnect alerts</button></>
+                      : <><button className="button button-primary" onClick={connectTelegramOwner} disabled={busy}>{telegramOwner.status === "pending" ? "Generate a fresh Telegram link" : "Connect Telegram"}</button>{telegramOwnerDeepLink && <a className="button button-quiet" href={telegramOwnerDeepLink} target="_blank" rel="noopener noreferrer">Open Telegram and press Start</a>}</>}
+                  </div>
+                </section>
+                <section className="panel whatsapp-panel">
+                  <div className="whatsapp-illustration">↗</div>
+                  <div className="whatsapp-copy">
+                    <span className={telegramBooking.booking_link ? "pill pill-green" : "pill pill-amber"}>{telegramBooking.booking_link ? "Booking link ready" : "Not configured"}</span>
+                    <h2>Customer booking link</h2>
+                    <p>This unique link opens the shared SmeOps bot with your business selected. Customers do not need to search for your business or choose from a list.</p>
+                    {telegramBooking.booking_link ? (
+                      <div className="connection-details">
+                        <label>Share this link<input readOnly value={telegramBooking.booking_link} onFocus={(event) => event.currentTarget.select()} /></label>
+                        <button className="button button-primary" onClick={() => void navigator.clipboard.writeText(telegramBooking.booking_link ?? "").then(() => setNotice("Booking link copied.")).catch(() => setError("Clipboard access was denied. Select and copy the link manually."))}>Copy booking link</button>
+                        <button className="button button-quiet" onClick={createTelegramBookingLink} disabled={busy}>Regenerate link</button>
+                      </div>
+                    ) : <button className="button button-primary" onClick={createTelegramBookingLink} disabled={busy}>Create customer booking link</button>}
+                  </div>
+                </section>
+              </div>
+              <div className="notice-panel"><strong>How it works</strong><p>Owner alerts and customer booking links are separate. A booking link only selects your business for a customer chat; it does not grant access to your dashboard or owner notifications.</p></div>
             </>
           )}
 

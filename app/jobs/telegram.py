@@ -53,6 +53,8 @@ async def _persist_telegram_message(
         return None
 
     text_body = message.get("text")
+    if isinstance(text_body, str) and (text_body == "/start" or text_body.startswith("/start ")):
+        text_body = "hello"
     contact = message.get("contact")
     if (
         not isinstance(text_body, str)
@@ -156,6 +158,8 @@ async def _consume_owner_link(session, *, tenant_id: UUID, payload: dict) -> boo
 
     parts = text_body.split(maxsplit=1)
     token = parts[1].strip() if len(parts) == 2 else ""
+    if token.startswith("book_"):
+        return False
     chat = message.get("chat")
     sender = message.get("from")
     if (

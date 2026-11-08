@@ -3,10 +3,13 @@ from app.models.business import Appointment, AuditEvent, BusinessHours, Customer
 from app.models.jobs import BackgroundJob
 from app.models.retail import Order, OrderItem, Product
 from app.models.telegram import (
+    TelegramBookingReference,
+    TelegramChatContext,
     TelegramConnection,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramPlatformBot,
     TelegramWebhookEvent,
 )
 from app.models.telegram_owner import TelegramOwnerLink, TelegramOwnerNotification
@@ -33,6 +36,9 @@ __all__ = [
     "Service",
     "Tenant",
     "TelegramConnection",
+    "TelegramPlatformBot",
+    "TelegramBookingReference",
+    "TelegramChatContext",
     "TelegramOwnerLink",
     "TelegramOwnerNotification",
     "TelegramConversation",

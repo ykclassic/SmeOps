@@ -9,10 +9,10 @@ from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.jobs.queue import enqueue_job
 from app.models import (
     AuditEvent,
-    TelegramConnection,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramPlatformBot,
 )
 
 
@@ -76,14 +76,14 @@ async def enqueue_telegram_text(
     if conversation is None:
         raise ValueError("Telegram conversation not found or closed")
 
-    connection_result = await session.execute(
-        select(TelegramConnection).where(
-            TelegramConnection.tenant_id == tenant_id,
-            TelegramConnection.status == "active",
+    platform_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
         )
     )
-    if connection_result.scalar_one_or_none() is None:
-        raise ValueError("Telegram bot connection is not active")
+    if platform_result.scalar_one_or_none() is None:
+        raise ValueError("SmeOps Telegram platform bot is not active")
 
     message = TelegramOutboundMessage(
         id=uuid4(),
