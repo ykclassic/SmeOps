@@ -18,7 +18,7 @@ from app.models import (
     Appointment,
     Customer,
     Service,
-    TelegramConnection,
+    TelegramPlatformBot,
     TelegramOwnerLink,
     TelegramOwnerNotification,
     Tenant,
@@ -74,13 +74,13 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
             )
         )
         link = link_result.scalar_one_or_none()
-        connection_result = await session.execute(
-            select(TelegramConnection).where(
-                TelegramConnection.tenant_id == job.tenant_id,
-                TelegramConnection.status == "active",
+        platform_result = await session.execute(
+            select(TelegramPlatformBot).where(
+                TelegramPlatformBot.singleton_key == "platform",
+                TelegramPlatformBot.status == "active",
             )
         )
-        connection = connection_result.scalar_one_or_none()
+        platform_bot = platform_result.scalar_one_or_none()
         appointment_result = await session.execute(
             select(Appointment, Service, Customer, Tenant)
             .join(
@@ -102,7 +102,7 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
         )
         appointment_row = appointment_result.one_or_none()
 
-        if link is None or connection is None or appointment_row is None:
+        if link is None or platform_bot is None or appointment_row is None:
             notification.status = "failed"
             notification.last_error_code = "recipient_or_appointment_unavailable"
             await session.commit()
@@ -123,7 +123,7 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
             "Status: Confirmed\n\n"
             "Open SmeOps to manage this appointment."
         )
-        bot_token = decrypt_telegram_secret(connection.bot_token_encrypted)
+        bot_token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
         chat_id = link.chat_id
         notification.status = "sending"
         await session.commit()
