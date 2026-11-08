@@ -20,12 +20,12 @@ from app.models import (
     TelegramOutboundMessage,
     Tenant,
 )
+from app.services.conversation_engine import process_telegram_conversation_job
 from app.services.salon_booking import (
     BookingConflict,
     create_appointment_booking,
     get_available_slots,
 )
-from app.services.conversation_engine import process_telegram_conversation_job
 
 
 @pytest.mark.parametrize("phone_input, expected_phone", [
