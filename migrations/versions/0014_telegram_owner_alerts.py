@@ -25,8 +25,18 @@ def upgrade() -> None:
         sa.Column("chat_id", sa.String(80), nullable=True),
         sa.Column("linked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("disabled_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "owner_user_id"], ["users.tenant_id", "users.id"],
@@ -76,7 +86,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_telegram_owner_notifications_tenant_created", table_name="telegram_owner_notifications")
+    op.drop_index(
+        "ix_telegram_owner_notifications_tenant_created",
+        table_name="telegram_owner_notifications",
+    )
     op.drop_table("telegram_owner_notifications")
-    op.drop_index("ix_telegram_owner_links_tenant_linked", table_name="telegram_owner_links")
+    op.drop_index(
+        "ix_telegram_owner_links_tenant_linked",
+        table_name="telegram_owner_links",
+    )
     op.drop_table("telegram_owner_links")
