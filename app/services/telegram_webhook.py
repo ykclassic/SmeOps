@@ -2,7 +2,6 @@ import hashlib
 import hmac
 import logging
 
-from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.config import get_settings
@@ -98,7 +97,10 @@ async def reconcile_platform_webhook_on_startup() -> None:
             )
             platform_bot = result.scalar_one_or_none()
             if platform_bot is None:
-                logger.info("Shared Telegram webhook reconciliation skipped: no active platform bot")
+                logger.info(
+                    "Shared Telegram webhook reconciliation skipped: "
+                    "no active platform bot"
+                )
                 return
             await ensure_platform_webhook(platform_bot)
             await session.commit()
