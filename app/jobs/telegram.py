@@ -53,6 +53,8 @@ async def _persist_telegram_message(
         return None
 
     text_body = message.get("text")
+    if isinstance(text_body, str) and (text_body == "/start" or text_body.startswith("/start ")):
+        text_body = "hello"
     contact = message.get("contact")
     if (
         not isinstance(text_body, str)
