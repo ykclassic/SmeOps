@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from typing import Annotated
 
 from app.api.dependencies import DbSession, require_roles
+from app.core.config import get_settings
 from app.core.telegram import (
     encrypt_telegram_secret,
     verify_telegram_webhook_secret,
