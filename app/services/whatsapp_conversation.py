@@ -278,6 +278,10 @@ async def process_channel_conversation_job(
                 if candidate.startswith("contact:"):
                     candidate = candidate.removeprefix("contact:").strip()
                 candidate = re.sub(r"[\s().-]", "", candidate)
+                if candidate.startswith("0") and len(candidate) == 11:
+                    candidate = "+234" + candidate[1:]
+                elif candidate.startswith("234") and len(candidate) == 13:
+                    candidate = "+" + candidate
                 if not PHONE_PATTERN.fullmatch(candidate):
                     reply = (
                         "Please send your phone number in international format, "
@@ -355,6 +359,8 @@ async def process_channel_conversation_job(
                 if normalized in YES_WORDS:
                     try:
                         booking_phone = booking.get("customer_phone") or customer_phone
+                        if booking_phone and not booking_phone.startswith("+"):
+                            booking_phone = "+" + booking_phone
                         if not booking_phone:
                             raise BookingConflict("A verified customer phone number is required")
                         appointment = await create_appointment_booking(
