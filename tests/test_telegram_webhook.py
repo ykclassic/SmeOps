@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.api import telegram as telegram_api
+from app.core.telegram import hash_telegram_webhook_secret
 from app.db.session import get_db_session
 from app.main import app
 
@@ -60,7 +61,7 @@ def test_telegram_webhook_rejects_invalid_secret(monkeypatch):
     tenant_id = uuid4()
     connection = SimpleNamespace(
         tenant_id=tenant_id,
-        webhook_secret_hash=telegram_api.hash_telegram_webhook_secret("correct-secret"),
+        webhook_secret_hash=hash_telegram_webhook_secret("correct-secret"),
     )
     session = FakeSession(connection)
     monkeypatch.setattr(telegram_api, "encrypt_telegram_secret", lambda value: "encrypted")
@@ -81,7 +82,7 @@ def test_telegram_webhook_persists_and_queues_valid_update(monkeypatch):
     tenant_id = uuid4()
     connection = SimpleNamespace(
         tenant_id=tenant_id,
-        webhook_secret_hash=telegram_api.hash_telegram_webhook_secret("correct-secret"),
+        webhook_secret_hash=hash_telegram_webhook_secret("correct-secret"),
     )
     session = FakeSession(connection)
     queued = []
@@ -119,7 +120,7 @@ def test_telegram_webhook_persists_and_queues_valid_update(monkeypatch):
 def test_telegram_webhook_rejects_malformed_update_id(monkeypatch):
     connection = SimpleNamespace(
         tenant_id=uuid4(),
-        webhook_secret_hash=telegram_api.hash_telegram_webhook_secret("correct-secret"),
+        webhook_secret_hash=hash_telegram_webhook_secret("correct-secret"),
     )
     session = FakeSession(connection)
     monkeypatch.setattr(telegram_api, "encrypt_telegram_secret", lambda value: "encrypted")
