@@ -5,6 +5,8 @@ from app.integrations.telegram_bot import (
     TelegramDeliveryUnknown,
     TelegramSendRejected,
     send_text_message,
+    get_bot_identity,
+    register_webhook,
 )
 
 
@@ -108,4 +110,50 @@ def test_text_and_identifier_limits_are_enforced():
                 chat_id="1",
                 body="x" * 4097,
             )
+        )
+
+
+
+@pytest.mark.asyncio
+async def test_get_me_returns_verified_bot_identity(monkeypatch):
+    FakeAsyncClient.responses = [
+        FakeResponse({"ok": True, "result": {"id": 123456789, "username": "smeops_test_bot"}})
+    ]
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    identity = await get_bot_identity(bot_token="123456:valid-test-token")
+
+    assert identity.bot_id == "123456789"
+    assert identity.username == "smeops_test_bot"
+    assert FakeAsyncClient.requests[0]["url"].endswith("/getMe")
+
+
+@pytest.mark.asyncio
+async def test_register_webhook_sends_secret_and_preserves_pending_updates(monkeypatch):
+    FakeAsyncClient.responses = [FakeResponse({"ok": True, "result": True})]
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await register_webhook(
+        bot_token="123456:valid-test-token",
+        webhook_url="https://api.example.com/webhooks/telegram/123456",
+        secret_token="secure_webhook_secret_123",
+    )
+
+    request = FakeAsyncClient.requests[0]
+    assert request["url"].endswith("/setWebhook")
+    assert request["json"]["secret_token"] == "secure_webhook_secret_123"
+    assert request["json"]["drop_pending_updates"] is False
+    assert request["json"]["allowed_updates"] == ["message"]
+
+
+@pytest.mark.asyncio
+async def test_register_webhook_rejects_non_https_url(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    with pytest.raises(ValueError):
+        await register_webhook(
+            bot_token="123456:valid-test-token",
+            webhook_url="http://api.example.com/webhook",
+            secret_token="secure_webhook_secret_123",
         )
