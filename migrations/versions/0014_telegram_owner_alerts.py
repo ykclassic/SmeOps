@@ -28,7 +28,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["appointment_id"], ["appointments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "owner_user_id"], ["users.tenant_id", "users.id"],
             name="fk_telegram_owner_links_tenant_owner", ondelete="CASCADE",
@@ -59,6 +58,7 @@ def upgrade() -> None:
             name="ck_telegram_owner_notifications_telegram_owner_notification_status_valid",
         ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["appointment_id"], ["appointments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "owner_user_id"], ["users.tenant_id", "users.id"],
             name="fk_telegram_owner_notifications_tenant_owner", ondelete="CASCADE",
