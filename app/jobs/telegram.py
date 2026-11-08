@@ -176,6 +176,7 @@ async def _consume_owner_link(session, *, tenant_id: UUID, payload: dict) -> boo
         or isinstance(sender_id, bool)
         or not isinstance(sender_id, int)
         or sender_id <= 0
+        or chat_id != sender_id
     ):
         return True
 
