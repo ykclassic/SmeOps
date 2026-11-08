@@ -30,10 +30,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "UPDATE appointments SET status = 'cancelled' "
-        "WHERE status IN ('completed', 'missed')"
-    )
+    bind = op.get_bind()
+    lifecycle_rows = bind.execute(
+        sa.text(
+            "SELECT count(*) FROM appointments "
+            "WHERE status IN ('completed', 'missed')"
+        )
+    ).scalar_one()
+    if lifecycle_rows:
+        raise RuntimeError(
+            "Cannot downgrade while completed or missed appointments exist; "
+            "export and reconcile lifecycle records before downgrading."
+        )
     op.drop_column("appointments", "rescheduled_at")
     op.drop_column("appointments", "missed_at")
     op.drop_column("appointments", "completed_at")
