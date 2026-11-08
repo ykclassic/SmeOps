@@ -1,6 +1,6 @@
 """Align shared Telegram webhook secret hash with runtime derivation.
 
-Revision ID: 0016_telegram_platform_webhook_secret
+Revision ID: 0016_tg_platform_secret
 Revises: 0015_telegram_platform_bot
 """
 import hashlib
@@ -11,7 +11,7 @@ from alembic import op
 
 from app.core.config import get_settings
 
-revision = "0016_telegram_platform_webhook_secret"
+revision = "0016_tg_platform_secret"
 down_revision = "0015_telegram_platform_bot"
 branch_labels = None
 depends_on = None
