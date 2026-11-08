@@ -10,7 +10,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentUser, DbSession, require_roles
-from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.models import (
     Appointment,
     AuditEvent,
@@ -28,6 +27,7 @@ from app.schemas.business import (
     ServiceCreate,
     ServiceResponse,
 )
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
 router = APIRouter(tags=["business operations"])
 ManagerOrOwner = Annotated[User, Depends(require_roles("owner", "manager"))]
