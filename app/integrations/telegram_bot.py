@@ -38,7 +38,7 @@ async def send_text_message(
                 json={"chat_id": chat_id, "text": body},
             )
     except httpx.TransportError as exc:
-        raise TelegramDeliveryUnknown("Telegram delivery outcome is unknown") from exc
+        raise TelegramDeliveryUnknown("Telegram delivery outcome is unknown") from None
 
     if 400 <= response.status_code < 500:
         raise TelegramSendRejected("Telegram rejected the message request")
