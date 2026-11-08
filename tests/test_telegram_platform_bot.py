@@ -141,3 +141,50 @@ def test_replayed_start_update_is_deduplicated_before_switching_tenant_context()
     assert response.json()["queued_events"] == 0
     assert session.records == []
     assert not session.committed
+
+
+def test_same_platform_bot_switches_between_two_businesses_only_on_valid_links(monkeypatch):
+    bot = platform_bot()
+    tenant_a = uuid4()
+    tenant_b = uuid4()
+    context = None
+    resolved_tenants = []
+    jobs = []
+
+    async def enqueue(_session, **kwargs):
+        jobs.append(kwargs)
+
+    monkeypatch.setattr(telegram_api, "enqueue_job", enqueue)
+    monkeypatch.setattr(telegram_api, "encrypt_telegram_secret", lambda value: f"enc:{value}")
+
+    for update_id, tenant_id, token in (
+        (201, tenant_a, "tenant-a-reference"),
+        (202, tenant_b, "tenant-b-reference"),
+    ):
+        reference = SimpleNamespace(tenant_id=tenant_id)
+        session = Session([bot, None, None, reference, context])
+        payload = start_update(token, update_id=update_id)
+        with client_for(session) as client:
+            response = client.post(
+                "/webhooks/telegram/platform",
+                headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
+                json=payload,
+            )
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert response.json()["queued_events"] == 1
+        event = next(
+            record for record in session.records
+            if hasattr(record, "provider_update_id")
+        )
+        resolved_tenants.append(event.tenant_id)
+        context = next(
+            record for record in session.records
+            if hasattr(record, "telegram_chat_id")
+        )
+
+    assert resolved_tenants == [tenant_a, tenant_b]
+    assert context.tenant_id == tenant_b
+    assert [job["tenant_id"] for job in jobs] == [tenant_a, tenant_b]
+    assert jobs[0]["idempotency_key"] != jobs[1]["idempotency_key"]
