@@ -1,3 +1,6 @@
+import hashlib
+import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -98,7 +101,11 @@ def connection():
 
 
 def test_duplicate_webhook_update_is_acknowledged_without_requeue(monkeypatch):
-    existing = SimpleNamespace(payload_sha256="same-payload-hash")
+    payload = {"update_id": 10, "message": {"text": "BOOK"}}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    existing = SimpleNamespace(
+        payload_sha256=hashlib.sha256(canonical.encode()).hexdigest()
+    )
     session = WebhookSession(connection(), existing=existing)
     queued = []
 
@@ -110,7 +117,7 @@ def test_duplicate_webhook_update_is_acknowledged_without_requeue(monkeypatch):
         response = client.post(
             "/webhooks/telegram/123456789",
             headers={"X-Telegram-Bot-Api-Secret-Token": "valid-secret"},
-            json={"update_id": 10, "message": {"text": "BOOK"}},
+            json=payload,
         )
     app.dependency_overrides.clear()
 
@@ -195,7 +202,7 @@ async def test_duplicate_inbound_message_is_not_persisted(monkeypatch):
         tenant_id=tenant_id,
         telegram_chat_id="123456",
         telegram_user_id="123456",
-        last_inbound_at=None,
+        last_inbound_at=datetime.now(UTC),
     )
     existing_message = SimpleNamespace(id=uuid4())
     session = InboundSession([conversation, existing_message])
