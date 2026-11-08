@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentUser, DbSession, require_roles
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.models import (
     Appointment,
     AuditEvent,
@@ -315,6 +316,13 @@ async def create_appointment(
             },
         )
     )
+    await session.flush()
+    await enqueue_appointment_owner_alerts(
+        session,
+        tenant_id=tenant.id,
+        appointment_id=appointment.id,
+    )
+
     try:
         await session.commit()
     except IntegrityError as exc:
