@@ -56,12 +56,16 @@ async def ensure_platform_webhook(platform_bot: TelegramPlatformBot) -> None:
 
     expected_secret = platform_webhook_secret(platform_bot.bot_id)
     expected_hash = hash_telegram_webhook_secret(expected_secret)
-    if not hmac.compare_digest(platform_bot.webhook_secret_hash, expected_hash):
+    secret_changed = not hmac.compare_digest(
+        platform_bot.webhook_secret_hash,
+        expected_hash,
+    )
+    if secret_changed:
         platform_bot.webhook_secret_hash = expected_hash
 
     webhook_url = f"{settings.public_api_base_url}{PLATFORM_WEBHOOK_PATH}"
     info = await get_webhook_info(bot_token=token)
-    if info.url != webhook_url:
+    if secret_changed or info.url != webhook_url:
         await register_webhook(
             bot_token=token,
             webhook_url=webhook_url,
@@ -77,6 +81,7 @@ async def ensure_platform_webhook(platform_bot: TelegramPlatformBot) -> None:
             "bot_id": platform_bot.bot_id,
             "webhook_url": info.url,
             "pending_update_count": info.pending_update_count,
+            "last_error_date": info.last_error_date,
             "has_last_error": info.last_error_date is not None,
         },
     )
