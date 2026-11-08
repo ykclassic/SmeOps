@@ -9,10 +9,10 @@ from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.jobs.queue import enqueue_job
 from app.models import (
     AuditEvent,
-    TelegramPlatformBot,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramPlatformBot,
 )
 
 
