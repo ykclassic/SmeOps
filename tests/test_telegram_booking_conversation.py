@@ -222,9 +222,6 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                 assert response.json()["queued_events"] == 1
                 return str(update_id)
 
-            start_update_id = send_customer_start()
-            asyncio.run(process_inbound(start_update_id, 1))
-
             def send_customer_message(text: str, sequence: int) -> str:
                 update_id = 800000 + sequence
                 message_payload = {
@@ -279,6 +276,9 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                     f"tg:conversation:{inbound_message.id}",
                 )
                 await process_telegram_conversation_job(conversation_job)
+
+            start_update_id = send_customer_start()
+            asyncio.run(process_inbound(start_update_id, 1))
 
             steps = ("1", "Ada Lovelace", phone_input, "tomorrow", "1", "YES")
             for sequence, customer_text in enumerate(steps, start=2):
