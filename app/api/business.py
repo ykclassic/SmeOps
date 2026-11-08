@@ -21,12 +21,12 @@ from app.models import (
 )
 from app.schemas.business import (
     AppointmentCreate,
+    AppointmentReschedule,
     AppointmentResponse,
     BusinessHoursReplace,
     BusinessHoursResponse,
     ServiceCreate,
     ServiceResponse,
-    AppointmentReschedule,
 )
 from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
@@ -504,6 +504,8 @@ async def reschedule_appointment(
         raise HTTPException(status_code=409, detail="Only confirmed appointments can be rescheduled")
 
     new_start = payload.starts_at.astimezone(UTC)
+    if new_start == appointment.starts_at:
+        return _appointment_response(appointment, customer)
     if new_start <= datetime.now(UTC):
         raise HTTPException(status_code=422, detail="Appointment must be in the future")
 
