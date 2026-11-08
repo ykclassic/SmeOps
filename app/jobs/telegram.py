@@ -1,5 +1,6 @@
 import json
 import logging
+import hashlib
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -10,6 +11,8 @@ from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob, enqueue_job
 from app.models import (
+    AuditEvent,
+    TelegramOwnerLink,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramWebhookEvent,
@@ -140,6 +143,72 @@ async def _persist_telegram_message(
     return conversation.id, record.id
 
 
+async def _consume_owner_link(session, *, tenant_id: UUID, payload: dict) -> bool:
+    """Consume a short-lived /start invitation before treating it as a customer chat."""
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return False
+    text_body = message.get("text")
+    if not isinstance(text_body, str) or not text_body.startswith("/start"):
+        return False
+
+    parts = text_body.split(maxsplit=1)
+    token = parts[1].strip() if len(parts) == 2 else ""
+    chat = message.get("chat")
+    sender = message.get("from")
+    if (
+        not token
+        or len(token) > 64
+        or not isinstance(chat, dict)
+        or chat.get("type") != "private"
+        or not isinstance(sender, dict)
+        or sender.get("is_bot") is True
+    ):
+        return True
+
+    chat_id = chat.get("id")
+    sender_id = sender.get("id")
+    if (
+        isinstance(chat_id, bool)
+        or not isinstance(chat_id, int)
+        or isinstance(sender_id, bool)
+        or not isinstance(sender_id, int)
+        or sender_id <= 0
+    ):
+        return True
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    result = await session.execute(
+        select(TelegramOwnerLink)
+        .where(
+            TelegramOwnerLink.invitation_hash == token_hash,
+            TelegramOwnerLink.tenant_id == tenant_id,
+            TelegramOwnerLink.expires_at > datetime.now(UTC),
+            TelegramOwnerLink.linked_at.is_(None),
+            TelegramOwnerLink.disabled_at.is_(None),
+        )
+        .with_for_update()
+    )
+    link = result.scalar_one_or_none()
+    if link is None:
+        logger.info("Telegram owner-link invitation rejected or expired")
+        return True
+
+    link.chat_id = str(chat_id)
+    link.linked_at = datetime.now(UTC)
+    session.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            actor_user_id=link.owner_user_id,
+            event_type="telegram.owner_link.connected",
+            subject_type="telegram_owner_link",
+            subject_id=link.id,
+            payload={},
+        )
+    )
+    return True
+
+
 async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
     try:
         event_id = UUID(job.payload["webhook_event_id"])
@@ -164,7 +233,12 @@ async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
             raise ValueError("Telegram webhook event is not processable")
 
         payload = json.loads(decrypt_telegram_secret(event.payload_encrypted))
-        persisted = await _persist_telegram_message(
+        owner_link_message = await _consume_owner_link(
+            session,
+            tenant_id=job.tenant_id,
+            payload=payload,
+        )
+        persisted = None if owner_link_message else await _persist_telegram_message(
             session,
             tenant_id=job.tenant_id,
             payload=payload,
