@@ -283,6 +283,21 @@ async def receive_platform_telegram_webhook(
     ):
         return {"status": "accepted", "queued_events": 0}
 
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    payload_hash = hashlib.sha256(canonical_payload.encode()).hexdigest()
+    provider_update_id = str(update_id)
+    duplicate_result = await session.execute(
+        select(TelegramWebhookEvent).where(
+            TelegramWebhookEvent.bot_id == platform_bot.bot_id,
+            TelegramWebhookEvent.provider_update_id == provider_update_id,
+        )
+    )
+    duplicate = duplicate_result.scalar_one_or_none()
+    if duplicate is not None:
+        if duplicate.payload_sha256 != payload_hash:
+            logger.warning("Telegram platform duplicate update payload hash mismatch")
+        return {"status": "accepted", "queued_events": 0}
+
     tenant_id = None
     text_body = message.get("text")
     token = ""
@@ -349,21 +364,6 @@ async def receive_platform_telegram_webhook(
         tenant_id = chat_context.tenant_id if chat_context is not None else None
     if tenant_id is None:
         # No default tenant is ever selected. The user must open a valid business link.
-        return {"status": "accepted", "queued_events": 0}
-
-    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    payload_hash = hashlib.sha256(canonical_payload.encode()).hexdigest()
-    provider_update_id = str(update_id)
-    duplicate_result = await session.execute(
-        select(TelegramWebhookEvent).where(
-            TelegramWebhookEvent.bot_id == platform_bot.bot_id,
-            TelegramWebhookEvent.provider_update_id == provider_update_id,
-        )
-    )
-    duplicate = duplicate_result.scalar_one_or_none()
-    if duplicate is not None:
-        if duplicate.payload_sha256 != payload_hash:
-            logger.warning("Telegram platform duplicate update payload hash mismatch")
         return {"status": "accepted", "queued_events": 0}
 
     event = TelegramWebhookEvent(
