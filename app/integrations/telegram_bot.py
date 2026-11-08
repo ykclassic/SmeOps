@@ -65,9 +65,11 @@ async def _call_bot_api(
             else "Telegram API request was rejected"
         )
     result = data.get("result")
-    if not isinstance(result, dict):
-        raise TelegramDeliveryUnknown("Telegram API response did not contain a result")
-    return result
+    if isinstance(result, dict):
+        return result
+    if result is True:
+        return {}
+    raise TelegramDeliveryUnknown("Telegram API response did not contain a result")
 
 
 async def get_bot_identity(*, bot_token: str) -> TelegramBotIdentity:
