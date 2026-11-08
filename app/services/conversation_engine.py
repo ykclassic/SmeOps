@@ -249,7 +249,11 @@ async def process_channel_conversation_job(
                         None,
                     )
                 if selected is None:
-                    _, reply = await _service_menu(session, job.tenant_id, business_name=tenant.name)
+                    _, reply = await _service_menu(
+                        session,
+                        job.tenant_id,
+                        business_name=tenant.name,
+                    )
                 else:
                     booking.update(
                         {
