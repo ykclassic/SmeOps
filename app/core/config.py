@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "staging", "production"] = "local"
     app_name: str = "SmeOps API"
+    public_api_base_url: str | None = None
     app_secret_key: SecretStr = SecretStr(LOCAL_SECRET)
     database_url: str = "postgresql+asyncpg://smeops:smeops@localhost:5432/smeops"
     log_level: str = "INFO"
@@ -95,6 +96,16 @@ class Settings(BaseSettings):
         if not re.fullmatch(r"\d{5,80}", value.strip()):
             raise ValueError("META_APP_ID must be a numeric Meta app ID")
         return value.strip()
+
+    @field_validator("public_api_base_url")
+    @classmethod
+    def validate_public_api_base_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip().rstrip("/")
+        if not normalized.startswith("https://") or len(normalized) > 512:
+            raise ValueError("PUBLIC_API_BASE_URL must be an HTTPS origin or base URL")
+        return normalized
 
     @field_validator("openai_model")
     @classmethod
