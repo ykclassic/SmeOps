@@ -364,7 +364,7 @@ async def list_appointments(
 async def cancel_appointment(
     appointment_id: UUID,
     session: DbSession,
-    user: CurrentUser,
+    user: ManagerOrOwner,
 ) -> AppointmentResponse:
     tenant = await _lock_tenant(session, user.tenant_id)
     result = await session.execute(
@@ -450,7 +450,10 @@ async def complete_appointment(
     tenant = await _lock_tenant(session, user.tenant_id)
     appointment, customer = await _get_locked_appointment(session, tenant.id, appointment_id)
     if appointment.status != "confirmed":
-        raise HTTPException(status_code=409, detail="Only confirmed appointments can be completed")
+        raise HTTPException(
+            status_code=409,
+            detail="Only confirmed appointments can be completed",
+        )
     now = datetime.now(UTC)
     appointment.status = "completed"
     appointment.completed_at = now
@@ -475,7 +478,10 @@ async def mark_appointment_missed(
     tenant = await _lock_tenant(session, user.tenant_id)
     appointment, customer = await _get_locked_appointment(session, tenant.id, appointment_id)
     if appointment.status != "confirmed":
-        raise HTTPException(status_code=409, detail="Only confirmed appointments can be marked missed")
+        raise HTTPException(
+            status_code=409,
+            detail="Only confirmed appointments can be marked missed",
+        )
     now = datetime.now(UTC)
     appointment.status = "missed"
     appointment.missed_at = now
@@ -510,7 +516,10 @@ async def reschedule_appointment(
         raise HTTPException(status_code=422, detail="Appointment must be in the future")
 
     service_result = await session.execute(
-        select(Service).where(Service.id == appointment.service_id, Service.tenant_id == tenant.id)
+        select(Service).where(
+            Service.id == appointment.service_id,
+            Service.tenant_id == tenant.id,
+        )
     )
     service = service_result.scalar_one_or_none()
     if service is None:
@@ -533,8 +542,12 @@ async def reschedule_appointment(
     local_start_time = local_start.time().replace(tzinfo=None)
     local_end_time = local_end.time().replace(tzinfo=None)
     if (
-        hours is None or hours.is_closed or hours.opens_at is None or hours.closes_at is None
-        or local_start_time < hours.opens_at or local_end_time > hours.closes_at
+        hours is None
+        or hours.is_closed
+        or hours.opens_at is None
+        or hours.closes_at is None
+        or local_start_time < hours.opens_at
+        or local_end_time > hours.closes_at
     ):
         raise HTTPException(status_code=409, detail="Requested time is outside business hours")
 
