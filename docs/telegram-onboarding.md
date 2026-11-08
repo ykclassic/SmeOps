@@ -59,9 +59,46 @@ update ID, encrypts and persists the event, and queues
 `telegram.accept_inbound`. Duplicate update IDs are acknowledged without
 creating duplicate jobs.
 
-Inbound processing currently persists Telegram conversations and encrypted
-message history. It is deliberately not connected to the appointment-booking
-conversation engine yet.
+Inbound processing persists Telegram conversations and encrypted message
+history, then queues the shared channel-independent appointment conversation
+engine. Only private chats from human Telegram accounts are accepted for the
+booking journey; group chats and bot-authored messages are ignored.
+
+## Shared appointment booking journey
+
+The same conversation engine is used by WhatsApp and Telegram. It uses the
+tenant's active services, configured business hours, timezone, availability
+checks, and appointment validation.
+
+The Telegram journey is:
+
+1. Customer sends BOOK (or starts with a greeting).
+2. Bot lists active services; customer selects by number or exact name.
+3. Bot collects the customer's name.
+4. Bot collects a phone number before checking availability. Customers may type
+   an international number or share their own Telegram contact. Contact shares
+   are accepted only when Telegram identifies the contact as belonging to the
+   sender. Nigerian local 11-digit numbers beginning with 0 are normalized to
+   the +234 country code; international numbers must be valid E.164-shaped
+   numbers.
+5. Bot asks for a date and offers available times based on the tenant's opening
+   hours and existing confirmed appointments.
+6. Bot summarizes the selected service, customer name, date, and time.
+7. No appointment is created until the customer explicitly replies YES.
+   NO abandons the pending selection.
+
+The final booking call revalidates the service, opening hours, future time,
+and appointment overlap. Booking creation locks the tenant row before checking
+for overlap and inserting the appointment. This serializes competing booking
+transactions across channels, so WhatsApp and Telegram cannot confirm the same
+shared appointment resource at the same time. The customer record is matched
+by the normalized phone number, so a customer using both channels can be
+recognized without linking Telegram IDs to WhatsApp identities.
+
+The appointment table, availability service, booking idempotency, and overlap
+validation are shared across channels. A slot becoming unavailable between
+display and YES confirmation is rejected and the customer is asked to choose
+again.
 
 ## Queue an outbound message
 
@@ -91,8 +128,10 @@ to `unknown` to avoid duplicate customer messages.
 - Telegram bot provisioning is API-only; the owner dashboard does not yet have
   a Telegram setup screen.
 - One bot is supported per tenant.
-- This increment does not implement appointment booking, phone collection,
-  staff inbox actions, bot disconnection, or cross-channel identity linking.
+- The booking conversation is integrated, but there is no Telegram setup screen
+  or Telegram staff inbox UI yet. Bot disconnection and cross-channel identity
+  linking are not implemented; customers are matched for booking only through
+  the phone number they provide.
 - A `sent` state means Telegram returned a message ID; it is not a recipient
   read receipt.
 - The Render staging API uses a Free service and may sleep. A sleeping service
