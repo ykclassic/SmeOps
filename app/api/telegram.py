@@ -65,8 +65,11 @@ async def _ensure_platform_webhook(platform_bot: TelegramPlatformBot) -> None:
             webhook_url=f"{settings.public_api_base_url}/webhooks/telegram/platform",
             secret_token=_telegram_webhook_secret(platform_bot.bot_id),
         )
-    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError):
-        logger.exception("Shared Telegram webhook registration failed")
+    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError) as exc:
+        logger.warning(
+            "Shared Telegram webhook registration failed",
+            extra={"error_type": type(exc).__name__},
+        )
         raise HTTPException(
             status_code=503,
             detail="SmeOps Telegram connection could not be activated",
