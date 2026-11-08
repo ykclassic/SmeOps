@@ -28,6 +28,7 @@ from app.services.whatsapp_conversation import process_telegram_conversation_job
     ("+2348012345678", "+2348012345678"),
     ("08012345678", "+2348012345678"),
     ("2348012345678", "+2348012345678"),
+    ("__contact__", "+2348012345678"),
 ])
 def test_telegram_booking_journey_and_cross_channel_conflict(
     monkeypatch,
@@ -133,19 +134,26 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
 
             def send_customer_message(text: str, sequence: int) -> str:
                 update_id = 800000 + sequence
+                message_payload = {
+                    "message_id": sequence,
+                    "date": int(datetime.now(UTC).timestamp()),
+                    "chat": {"id": chat_id, "type": "private"},
+                    "from": {
+                        "id": user_id,
+                        "is_bot": False,
+                        "first_name": "Ada",
+                    },
+                }
+                if text == "__contact__":
+                    message_payload["contact"] = {
+                        "phone_number": "08012345678",
+                        "user_id": user_id,
+                    }
+                else:
+                    message_payload["text"] = text
                 payload = {
                     "update_id": update_id,
-                    "message": {
-                        "message_id": sequence,
-                        "date": int(datetime.now(UTC).timestamp()),
-                        "chat": {"id": chat_id, "type": "private"},
-                        "from": {
-                            "id": user_id,
-                            "is_bot": False,
-                            "first_name": "Ada",
-                        },
-                        "text": text,
-                    },
+                    "message": message_payload,
                 }
                 connection_secret = telegram_api._telegram_webhook_secret("123456789")
                 response = client.post(
