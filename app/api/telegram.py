@@ -2,30 +2,29 @@ import hashlib
 import hmac
 import json
 import logging
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from typing import Annotated
-
 from app.api.dependencies import DbSession, require_roles
 from app.core.config import get_settings
 from app.core.telegram import (
-    encrypt_telegram_secret,
-    verify_telegram_webhook_secret,
-    hash_telegram_webhook_secret,
     decrypt_telegram_secret,
+    encrypt_telegram_secret,
+    hash_telegram_webhook_secret,
+    verify_telegram_webhook_secret,
 )
-from app.jobs.queue import enqueue_job
-from app.models import AuditEvent, TelegramConnection, TelegramWebhookEvent, User
 from app.integrations.telegram_bot import (
     TelegramAPIError,
     TelegramDeliveryUnknown,
     get_bot_identity,
     register_webhook,
 )
+from app.jobs.queue import enqueue_job
+from app.models import AuditEvent, TelegramConnection, TelegramWebhookEvent, User
 from app.schemas.telegram import (
     TelegramConnectionProvision,
     TelegramConnectionResponse,
@@ -231,7 +230,10 @@ async def provision_telegram_connection(
     try:
         identity = await get_bot_identity(bot_token=token)
     except (TelegramAPIError, TelegramDeliveryUnknown, ValueError):
-        raise HTTPException(status_code=502, detail="Telegram bot credentials could not be verified") from None
+        raise HTTPException(
+            status_code=502,
+            detail="Telegram bot credentials could not be verified",
+        ) from None
 
     result = await session.execute(
         select(TelegramConnection)
