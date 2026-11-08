@@ -51,6 +51,7 @@ class TelegramWebhookEvent(UUIDPrimaryKey, Base):
             "tenant_id", "provider_update_id",
             name="uq_telegram_webhook_events_tenant_update",
         ),
+        UniqueConstraint("bot_id", "provider_update_id", name="uq_telegram_webhook_events_bot_update"),
         CheckConstraint(
             "status IN ('queued', 'processed', 'failed')",
             name="telegram_webhook_event_status_valid",
@@ -65,6 +66,7 @@ class TelegramWebhookEvent(UUIDPrimaryKey, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
+    bot_id: Mapped[str] = mapped_column(String(80), nullable=False)
     provider_update_id: Mapped[str] = mapped_column(String(80), nullable=False)
     event_type: Mapped[str] = mapped_column(String(80), nullable=False)
     payload_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
