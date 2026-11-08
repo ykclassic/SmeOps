@@ -13,7 +13,7 @@ from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.jobs.whatsapp_onboarding import complete_whatsapp_onboarding_job
 from app.jobs.whatsapp_outbound import send_outbound_whatsapp_job
 from app.jobs.worker import run_forever
-from app.services.whatsapp_conversation import (
+from app.services.conversation_engine import (
     process_telegram_conversation_job,
     process_whatsapp_conversation_job,
 )
