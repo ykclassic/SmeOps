@@ -20,7 +20,11 @@ from app.models import (
     TelegramOutboundMessage,
     Tenant,
 )
-from app.services.salon_booking import BookingConflict, create_appointment_booking
+from app.services.salon_booking import (
+    BookingConflict,
+    create_appointment_booking,
+    get_available_slots,
+)
 from app.services.whatsapp_conversation import process_telegram_conversation_job
 
 
@@ -247,6 +251,51 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         )
 
             asyncio.run(verify_cross_channel_conflict())
+
+            async def verify_concurrent_cross_channel_race():
+                async with AsyncSessionFactory() as session:
+                    slots = await get_available_slots(
+                        session,
+                        tenant_id=tenant_id,
+                        service_id=service_id,
+                        day=appointment.starts_at.astimezone().date() + __import__(
+                            "datetime"
+                        ).timedelta(days=0),
+                        limit=3,
+                    )
+                candidate = next(
+                    (slot for slot in slots if slot != appointment.starts_at),
+                    None,
+                )
+                assert candidate is not None
+
+                async def attempt(source: str, phone: str) -> str:
+                    async with AsyncSessionFactory() as session:
+                        try:
+                            await create_appointment_booking(
+                                session,
+                                tenant_id=tenant_id,
+                                service_id=service_id,
+                                customer_name=f"{source.title()} Customer",
+                                customer_phone=phone,
+                                starts_at=candidate,
+                                conversation_id=uuid4(),
+                                booking_attempt_id=uuid4(),
+                                source=source,
+                            )
+                        except BookingConflict:
+                            await session.rollback()
+                            return "conflict"
+                        await session.commit()
+                        return "booked"
+
+                outcomes = await asyncio.gather(
+                    attempt("telegram", "+2348022222222"),
+                    attempt("whatsapp", "+2348033333333"),
+                )
+                assert sorted(outcomes) == ["booked", "conflict"]
+
+            asyncio.run(verify_concurrent_cross_channel_race())
 
     finally:
         if tenant_id is not None:
