@@ -22,7 +22,9 @@ function isAllowedPath(path: string): boolean {
     /^whatsapp\/conversations\/[0-9a-f-]+\/messages$/i.test(path) ||
     /^whatsapp\/conversations\/[0-9a-f-]+\/resolve$/i.test(path) ||
     path === "whatsapp/messages" ||
-    path === "whatsapp/embedded-signup"
+    path === "whatsapp/embedded-signup" ||
+    path === "telegram/owner-link" ||
+    path === "telegram/booking-link"
   );
 }
 
