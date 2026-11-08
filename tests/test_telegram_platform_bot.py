@@ -93,7 +93,7 @@ def test_shared_bot_resolves_booking_link_and_queues_tenant_scoped_event(monkeyp
         response = client.post(
             "/webhooks/telegram/platform",
             headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
-            json=start_update("valid-booking-reference"),
+            json=start_update("book_valid-booking-reference"),
         )
     app.dependency_overrides.clear()
 
@@ -115,7 +115,7 @@ def test_invalid_booking_reference_never_falls_back_to_existing_chat_context():
         response = client.post(
             "/webhooks/telegram/platform",
             headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
-            json=start_update("invalid-reference"),
+            json=start_update("book_invalid-reference"),
         )
     app.dependency_overrides.clear()
 
@@ -158,8 +158,8 @@ def test_same_platform_bot_switches_between_two_businesses_only_on_valid_links(m
     monkeypatch.setattr(telegram_api, "encrypt_telegram_secret", lambda value: f"enc:{value}")
 
     for update_id, tenant_id, token in (
-        (201, tenant_a, "tenant-a-reference"),
-        (202, tenant_b, "tenant-b-reference"),
+        (201, tenant_a, "book_tenant-a-reference"),
+        (202, tenant_b, "book_tenant-b-reference"),
     ):
         reference = SimpleNamespace(tenant_id=tenant_id)
         session = Session([bot, None, None, reference, context])
