@@ -180,3 +180,25 @@ async def test_existing_owner_notification_is_not_queued_again(monkeypatch):
     assert count == 0
     assert jobs == []
     assert session.records == []
+
+
+
+@pytest.mark.asyncio
+async def test_owner_link_rejects_private_chat_not_owned_by_sender():
+    session = Session([])
+
+    consumed = await telegram_jobs._consume_owner_link(
+        session,
+        tenant_id=uuid4(),
+        payload={
+            "message": {
+                "text": "/start token",
+                "chat": {"id": 998877, "type": "private"},
+                "from": {"id": 112233, "is_bot": False},
+            }
+        },
+    )
+
+    assert consumed is True
+    assert session.records == []
+    assert session.results == []
