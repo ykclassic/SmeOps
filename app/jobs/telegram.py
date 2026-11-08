@@ -38,6 +38,8 @@ async def _persist_telegram_message(
     sender = message.get("from")
     if not isinstance(chat, dict) or not isinstance(sender, dict):
         return None
+    if chat.get("type") != "private" or sender.get("is_bot") is True:
+        return None
     chat_id = chat.get("id")
     user_id = sender.get("id")
     message_id = message.get("message_id")
