@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,7 +18,10 @@ from app.models import (
     Customer,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramOwnerLink,
+    TelegramOwnerNotification,
     Tenant,
+    User,
 )
 from app.services.conversation_engine import process_telegram_conversation_job
 from app.services.salon_booking import (
@@ -116,6 +119,31 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             )
             assert provision.status_code == 202
             assert provision.json()["status"] == "active"
+
+            async def link_test_owner():
+                async with AsyncSessionFactory() as session:
+                    owner_result = await session.execute(
+                        select(User).where(
+                            User.tenant_id == tenant_id,
+                            User.role == "owner",
+                            User.status == "active",
+                        )
+                    )
+                    owner = owner_result.scalar_one()
+                    now = datetime.now(UTC)
+                    session.add(
+                        TelegramOwnerLink(
+                            tenant_id=tenant_id,
+                            owner_user_id=owner.id,
+                            invitation_hash=uuid4().hex * 2,
+                            expires_at=now + timedelta(minutes=15),
+                            chat_id=str(chat_id),
+                            linked_at=now,
+                        )
+                    )
+                    await session.commit()
+
+            asyncio.run(link_test_owner())
 
             async def find_job(job_type: str, idempotency_key: str) -> ClaimedJob:
                 async with AsyncSessionFactory() as session:
@@ -219,9 +247,36 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         select(Customer).where(Customer.tenant_id == tenant_id)
                     )
                     customers = list(customer_result.scalars().all())
-                    return appointments, outbound, history, customers
+                    notifications_result = await session.execute(
+                        select(TelegramOwnerNotification).where(
+                            TelegramOwnerNotification.tenant_id == tenant_id
+                        )
+                    )
+                    notifications = list(notifications_result.scalars().all())
+                    alert_jobs_result = await session.execute(
+                        select(BackgroundJob).where(
+                            BackgroundJob.tenant_id == tenant_id,
+                            BackgroundJob.job_type == "telegram.owner_appointment_alert",
+                        )
+                    )
+                    alert_jobs = list(alert_jobs_result.scalars().all())
+                    return (
+                        appointments,
+                        outbound,
+                        history,
+                        customers,
+                        notifications,
+                        alert_jobs,
+                    )
 
-            appointments, outbound, history, customers = asyncio.run(inspect_results())
+            (
+                appointments,
+                outbound,
+                history,
+                customers,
+                notifications,
+                alert_jobs,
+            ) = asyncio.run(inspect_results())
             assert len(appointments) == 1
             appointment = appointments[0]
             assert appointment.status == "confirmed"
@@ -229,6 +284,9 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             assert len(history) == 7
             assert len(customers) == 1
             assert customers[0].phone_e164 == expected_phone
+            assert len(notifications) == 1
+            assert notifications[0].status == "queued"
+            assert len(alert_jobs) == 1
             assert any(
                 "appointment is confirmed"
                 in decrypt_telegram_secret(item.body_encrypted).casefold()
