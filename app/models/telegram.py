@@ -177,3 +177,69 @@ class TelegramOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     provider_message_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+
+class TelegramPlatformBot(UUIDPrimaryKey, TimestampMixin, Base):
+    """Singleton platform-managed Telegram bot credential; never tenant supplied."""
+
+    __tablename__ = "telegram_platform_bots"
+    __table_args__ = (
+        UniqueConstraint("bot_id", name="uq_telegram_platform_bots_bot_id"),
+        CheckConstraint("singleton_key = 'platform'", name="telegram_platform_bot_singleton"),
+    )
+
+    singleton_key: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="platform", server_default=text("'platform'")
+    )
+    bot_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    bot_username: Mapped[str] = mapped_column(String(80), nullable=False)
+    bot_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    webhook_secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[Literal["active", "disabled"]] = mapped_column(
+        String(16), nullable=False, default="active", server_default=text("'active'")
+    )
+
+
+class TelegramBookingReference(UUIDPrimaryKey, TimestampMixin, Base):
+    """Opaque customer-facing business link; stores only a SHA-256 token hash."""
+
+    __tablename__ = "telegram_booking_references"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_telegram_booking_references_token_hash"),
+        UniqueConstraint("tenant_id", name="uq_telegram_booking_references_tenant"),
+        Index("ix_telegram_booking_references_tenant_active", "tenant_id", "revoked_at"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TelegramChatContext(UUIDPrimaryKey, TimestampMixin, Base):
+    """Current business selection for a private chat on the shared platform bot."""
+
+    __tablename__ = "telegram_chat_contexts"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform_bot_id", "telegram_chat_id",
+            name="uq_telegram_chat_contexts_bot_chat",
+        ),
+        Index("ix_telegram_chat_contexts_tenant", "tenant_id"),
+    )
+
+    platform_bot_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("telegram_platform_bots.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    telegram_user_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    telegram_chat_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    selected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
