@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.db.session import engine
 from app.jobs.telegram import accept_inbound_telegram_job
+from app.jobs.telegram_outbound import send_outbound_telegram_job
 from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.jobs.whatsapp_onboarding import complete_whatsapp_onboarding_job
 from app.jobs.whatsapp_outbound import send_outbound_whatsapp_job
@@ -24,6 +25,7 @@ WORKER_LOCK_RETRY_SECONDS = 5.0
 HANDLERS = {
     "whatsapp.accept_inbound": accept_inbound_whatsapp_job,
     "telegram.accept_inbound": accept_inbound_telegram_job,
+    "telegram.send_text": send_outbound_telegram_job,
     "whatsapp.complete_signup": complete_whatsapp_onboarding_job,
     "whatsapp.process_conversation": process_whatsapp_conversation_job,
     "whatsapp.send_text": send_outbound_whatsapp_job,
