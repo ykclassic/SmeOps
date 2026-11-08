@@ -12,12 +12,14 @@ from app.api.retail import router as retail_router
 from app.api.telegram import router as telegram_router
 from app.api.whatsapp import router as whatsapp_router
 from app.core.config import get_settings
+from app.core.logging import configure_http_client_logging
 from app.db.session import engine
 from app.services.telegram_webhook import reconcile_platform_webhook_on_startup
 from app.worker import run_embedded_worker
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
+configure_http_client_logging()
 logger = logging.getLogger(__name__)
 
 WORKER_SHUTDOWN_TIMEOUT_SECONDS = 20
