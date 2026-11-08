@@ -16,9 +16,9 @@ from app.models import (
     Appointment,
     BackgroundJob,
     Customer,
-    Tenant,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    Tenant,
 )
 from app.services.salon_booking import BookingConflict, create_appointment_booking
 from app.services.whatsapp_conversation import process_telegram_conversation_job
