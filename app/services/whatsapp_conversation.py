@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -6,6 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.telegram import decrypt_telegram_secret
 from app.core.whatsapp import decrypt_whatsapp_secret
 from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
@@ -15,15 +17,18 @@ from app.jobs.queue import ClaimedJob
 from app.models import (
     Service,
     Tenant,
+    TelegramConversation,
+    TelegramConversationMessage,
     WhatsAppConversation,
     WhatsAppConversationMessage,
 )
 from app.services.salon_booking import (
     BookingConflict,
-    create_whatsapp_booking,
+    create_appointment_booking,
     get_available_slots,
     parse_booking_date,
 )
+from app.services.telegram_outbound import enqueue_telegram_text
 from app.services.whatsapp_outbound import (
     OutboundPolicyViolation,
     enqueue_whatsapp_text,
@@ -35,6 +40,7 @@ YES_WORDS = {"yes", "y", "confirm", "confirmed", "book it", "please book"}
 NO_WORDS = {"no", "n", "cancel", "no thanks"}
 HUMAN_WORDS = {"human", "agent", "staff", "talk to someone", "support"}
 START_WORDS = {"hi", "hello", "hey", "book", "booking", "appointment", "appointments"}
+PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
 def _format_price(price_minor: int) -> str:
@@ -67,11 +73,24 @@ async def _service_menu(session: AsyncSession, tenant_id: UUID) -> tuple[list[Se
 async def _send_reply(
     session: AsyncSession,
     *,
+    channel: str,
     tenant_id: UUID,
-    customer_phone: str,
+    conversation_id: UUID,
+    customer_phone: str | None,
     inbound_message_id: UUID,
     body: str,
 ) -> None:
+    if channel == "telegram":
+        await enqueue_telegram_text(
+            session,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            body=body,
+            idempotency_key=f"conversation-reply:{inbound_message_id}",
+        )
+        return
+    if customer_phone is None:
+        raise ValueError("WhatsApp customer phone is required")
     await enqueue_whatsapp_text(
         session,
         tenant_id=tenant_id,
@@ -81,7 +100,13 @@ async def _send_reply(
     )
 
 
-async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
+async def process_channel_conversation_job(
+    job: ClaimedJob,
+    *,
+    channel: str,
+) -> None:
+    if channel not in {"whatsapp", "telegram"}:
+        raise ValueError("Unsupported conversation channel")
     try:
         conversation_id = UUID(job.payload["conversation_id"])
         message_id = UUID(job.payload["message_id"])
@@ -90,12 +115,22 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
 
     from app.db.session import AsyncSessionFactory
 
+    conversation_model = (
+        TelegramConversation if channel == "telegram" else WhatsAppConversation
+    )
+    message_model = (
+        TelegramConversationMessage if channel == "telegram" else WhatsAppConversationMessage
+    )
+    decrypt_secret = (
+        decrypt_telegram_secret if channel == "telegram" else decrypt_whatsapp_secret
+    )
+
     async with AsyncSessionFactory() as session:
         conversation_result = await session.execute(
-            select(WhatsAppConversation)
+            select(conversation_model)
             .where(
-                WhatsAppConversation.id == conversation_id,
-                WhatsAppConversation.tenant_id == job.tenant_id,
+                conversation_model.id == conversation_id,
+                conversation_model.tenant_id == job.tenant_id,
             )
             .with_for_update()
         )
@@ -104,17 +139,20 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
             raise ValueError("Conversation does not exist")
 
         message_result = await session.execute(
-            select(WhatsAppConversationMessage).where(
-                WhatsAppConversationMessage.id == message_id,
-                WhatsAppConversationMessage.conversation_id == conversation_id,
-                WhatsAppConversationMessage.tenant_id == job.tenant_id,
-                WhatsAppConversationMessage.direction == "inbound",
+            select(message_model).where(
+                message_model.id == message_id,
+                message_model.conversation_id == conversation_id,
+                message_model.tenant_id == job.tenant_id,
+                message_model.direction == "inbound",
             )
         )
         inbound = message_result.scalar_one_or_none()
         if inbound is None or inbound.body_encrypted is None:
             return
-        if conversation.is_opted_out or conversation.status in {"human_required", "closed"}:
+        if (
+            (channel == "whatsapp" and conversation.is_opted_out)
+            or conversation.status in {"human_required", "closed"}
+        ):
             return
 
         context = dict(conversation.context or {})
@@ -127,7 +165,7 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
             if previous_at is not None and inbound.created_at <= previous_at:
                 return
 
-        body = decrypt_whatsapp_secret(inbound.body_encrypted).strip()
+        body = decrypt_secret(inbound.body_encrypted).strip()
         if not body:
             return
         normalized = " ".join(body.casefold().split())
@@ -135,7 +173,15 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
         if tenant is None:
             raise ValueError("Business tenant does not exist")
         timezone = ZoneInfo(tenant.business_timezone)
-        customer_phone = decrypt_whatsapp_secret(conversation.customer_phone_encrypted)
+        customer_phone = None
+        if channel == "whatsapp":
+            customer_phone = decrypt_whatsapp_secret(
+                conversation.customer_phone_encrypted
+            )
+        elif conversation.customer_phone_encrypted:
+            customer_phone = decrypt_telegram_secret(
+                conversation.customer_phone_encrypted
+            )
         reply: str
         booking = dict(context.get("booking") or {})
         ai_intent = None
@@ -213,11 +259,44 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
                     reply = "Please send the name for the appointment (2–160 characters)."
                 else:
                     booking["customer_name"] = customer_name
+                    if channel == "telegram" and not customer_phone:
+                        booking["step"] = "awaiting_phone"
+                        reply = (
+                            f"Thanks, {customer_name}. Before checking availability, "
+                            "please send your phone number in international format "
+                            "(for example +2348012345678), or share your Telegram contact."
+                        )
+                    else:
+                        booking["step"] = "awaiting_date"
+                        reply = (
+                            f"Thanks, {customer_name}. What day would you like to visit? "
+                            "Reply with today, tomorrow, a weekday (for example Friday), "
+                            "or a date in YYYY-MM-DD format."
+                        )
+            elif step == "awaiting_phone":
+                candidate = body.strip()
+                if candidate.startswith("contact:"):
+                    candidate = candidate.removeprefix("contact:").strip()
+                candidate = re.sub(r"[\s().-]", "", candidate)
+                if not PHONE_PATTERN.fullmatch(candidate):
+                    reply = (
+                        "Please send your phone number in international format, "
+                        "including the country code (for example +2348012345678), "
+                        "or share your Telegram contact."
+                    )
+                else:
+                    customer_phone = candidate
+                    conversation.customer_phone_encrypted = (
+                        __import__("app.core.telegram", fromlist=["encrypt_telegram_secret"])
+                        .encrypt_telegram_secret(candidate)
+                        if channel == "telegram"
+                        else conversation.customer_phone_encrypted
+                    )
+                    booking["customer_phone"] = candidate
                     booking["step"] = "awaiting_date"
                     reply = (
-                        f"Thanks, {customer_name}. What day would you like to visit? "
-                        "Reply with today, tomorrow, a weekday (for example Friday), "
-                        "or a date in YYYY-MM-DD format."
+                        "Thanks. What day would you like to visit? Reply with today, "
+                        "tomorrow, a weekday, or a date in YYYY-MM-DD format."
                     )
             elif step == "awaiting_date":
                 requested_day = parse_booking_date(
@@ -277,15 +356,19 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
             elif step == "awaiting_confirmation":
                 if normalized in YES_WORDS:
                     try:
-                        appointment = await create_whatsapp_booking(
+                        booking_phone = booking.get("customer_phone") or customer_phone
+                        if not booking_phone:
+                            raise BookingConflict("A verified customer phone number is required")
+                        appointment = await create_appointment_booking(
                             session,
                             tenant_id=job.tenant_id,
                             service_id=UUID(booking["service_id"]),
                             customer_name=booking["customer_name"],
-                            customer_phone=f"+{customer_phone}",
+                            customer_phone=booking_phone,
                             starts_at=datetime.fromisoformat(booking["starts_at"]),
                             conversation_id=conversation.id,
                             booking_attempt_id=UUID(booking["booking_attempt_id"]),
+                            source=channel,
                         )
                     except (BookingConflict, ValueError):
                         booking = {}
@@ -340,7 +423,9 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
         try:
             await _send_reply(
                 session,
+                channel=channel,
                 tenant_id=job.tenant_id,
+                conversation_id=conversation.id,
                 customer_phone=customer_phone,
                 inbound_message_id=inbound.id,
                 body=reply,
@@ -351,3 +436,12 @@ async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
                 extra={"tenant_id": str(job.tenant_id), "conversation_id": str(conversation.id)},
             )
             await session.commit()
+
+
+
+async def process_whatsapp_conversation_job(job: ClaimedJob) -> None:
+    await process_channel_conversation_job(job, channel="whatsapp")
+
+
+async def process_telegram_conversation_job(job: ClaimedJob) -> None:
+    await process_channel_conversation_job(job, channel="telegram")
