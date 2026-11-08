@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.telegram import decrypt_telegram_secret
+from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.core.whatsapp import decrypt_whatsapp_secret
 from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
@@ -286,12 +286,10 @@ async def process_channel_conversation_job(
                     )
                 else:
                     customer_phone = candidate
-                    conversation.customer_phone_encrypted = (
-                        __import__("app.core.telegram", fromlist=["encrypt_telegram_secret"])
-                        .encrypt_telegram_secret(candidate)
-                        if channel == "telegram"
-                        else conversation.customer_phone_encrypted
-                    )
+                    if channel == "telegram":
+                        conversation.customer_phone_encrypted = encrypt_telegram_secret(
+                            candidate
+                        )
                     booking["customer_phone"] = candidate
                     booking["step"] = "awaiting_date"
                     reply = (
