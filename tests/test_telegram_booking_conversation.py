@@ -248,9 +248,9 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                     "update_id": update_id,
                     "message": message_payload,
                 }
-                connection_secret = telegram_api._telegram_webhook_secret("123456789")
+                connection_secret = telegram_api._telegram_webhook_secret("9016622451")
                 response = client.post(
-                    "/webhooks/telegram/123456789",
+                    "/webhooks/telegram/platform",
                     json=payload,
                     headers={"X-Telegram-Bot-Api-Secret-Token": connection_secret},
                 )
@@ -261,7 +261,7 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             async def process_inbound(update_id: str, sequence: int) -> None:
                 inbound_job = await find_job(
                     "telegram.accept_inbound",
-                    f"tg:update:{update_id}",
+                    f"tg:platform:9016622451:{update_id}",
                 )
                 await accept_inbound_telegram_job(inbound_job)
                 async with AsyncSessionFactory() as session:
