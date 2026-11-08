@@ -16,9 +16,9 @@ from app.integrations.conversation_ai import (
 from app.jobs.queue import ClaimedJob
 from app.models import (
     Service,
-    Tenant,
     TelegramConversation,
     TelegramConversationMessage,
+    Tenant,
     WhatsAppConversation,
     WhatsAppConversationMessage,
 )
