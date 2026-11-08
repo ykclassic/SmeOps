@@ -51,7 +51,10 @@ class TelegramWebhookEvent(UUIDPrimaryKey, Base):
             "tenant_id", "provider_update_id",
             name="uq_telegram_webhook_events_tenant_update",
         ),
-        UniqueConstraint("bot_id", "provider_update_id", name="uq_telegram_webhook_events_bot_update"),
+        UniqueConstraint(
+            "bot_id", "provider_update_id",
+            name="uq_telegram_webhook_events_bot_update",
+        ),
         CheckConstraint(
             "status IN ('queued', 'processed', 'failed')",
             name="telegram_webhook_event_status_valid",
