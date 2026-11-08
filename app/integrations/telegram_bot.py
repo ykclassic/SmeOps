@@ -97,7 +97,12 @@ async def get_webhook_info(*, bot_token: str) -> TelegramWebhookInfo:
     pending = result.get("pending_update_count", 0)
     last_error_date = result.get("last_error_date")
     last_error_message = result.get("last_error_message")
-    if not isinstance(url, str) or isinstance(pending, bool) or not isinstance(pending, int) or pending < 0:
+    if (
+        not isinstance(url, str)
+        or isinstance(pending, bool)
+        or not isinstance(pending, int)
+        or pending < 0
+    ):
         raise TelegramAPIError("Telegram returned invalid webhook diagnostics")
     if last_error_date is not None and (
         isinstance(last_error_date, bool) or not isinstance(last_error_date, int)
