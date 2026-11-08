@@ -61,8 +61,18 @@ def upgrade() -> None:
         sa.Column("provider_message_id", sa.String(80), nullable=True),
         sa.Column("last_error_code", sa.String(80), nullable=True),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.CheckConstraint(
             "status IN ('queued', 'sending', 'sent', 'failed', 'unknown')",
             name="ck_telegram_owner_notifications_telegram_owner_notification_status_valid",
