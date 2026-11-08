@@ -10,6 +10,7 @@ from app.api.health import router as health_router
 from app.api.ops import router as ops_router
 from app.api.retail import router as retail_router
 from app.api.whatsapp import router as whatsapp_router
+from app.api.telegram import router as telegram_router
 from app.core.config import get_settings
 from app.db.session import engine
 from app.worker import run_embedded_worker
@@ -96,6 +97,7 @@ app.include_router(auth_router)
 app.include_router(business_router)
 app.include_router(retail_router)
 app.include_router(whatsapp_router)
+app.include_router(telegram_router)
 
 
 @app.get("/", include_in_schema=False)
