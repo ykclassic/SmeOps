@@ -17,7 +17,6 @@ from app.models import (
     BackgroundJob,
     Customer,
     Tenant,
-    TelegramConnection,
     TelegramConversationMessage,
     TelegramOutboundMessage,
 )
