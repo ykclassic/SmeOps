@@ -83,6 +83,7 @@ def test_telegram_webhook_persists_and_queues_valid_update(monkeypatch):
     tenant_id = uuid4()
     connection = SimpleNamespace(
         tenant_id=tenant_id,
+        bot_id="9016622451",
         webhook_secret_hash=hash_telegram_webhook_secret("correct-secret"),
     )
     session = FakeSession(connection)
