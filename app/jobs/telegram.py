@@ -149,7 +149,9 @@ async def _consume_owner_link(session, *, tenant_id: UUID, payload: dict) -> boo
     if not isinstance(message, dict):
         return False
     text_body = message.get("text")
-    if not isinstance(text_body, str) or not (text_body == "/start" or text_body.startswith("/start ")):
+    if not isinstance(text_body, str) or not (
+        text_body == "/start" or text_body.startswith("/start ")
+    ):
         return False
 
     parts = text_body.split(maxsplit=1)
