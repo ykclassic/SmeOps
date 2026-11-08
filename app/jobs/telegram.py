@@ -12,9 +12,9 @@ from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob, enqueue_job
 from app.models import (
     AuditEvent,
-    TelegramOwnerLink,
     TelegramConversation,
     TelegramConversationMessage,
+    TelegramOwnerLink,
     TelegramWebhookEvent,
 )
 
