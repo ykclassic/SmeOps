@@ -17,7 +17,7 @@ down_revision: str | None = "0014_telegram_owner_alerts"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-EXPECTED_BOT_ID = "901662451"
+EXPECTED_BOT_ID = "9016622451"
 
 
 def upgrade() -> None:
