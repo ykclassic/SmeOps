@@ -54,12 +54,6 @@ class TelegramOwnerNotification(UUIDPrimaryKey, TimestampMixin, Base):
             name="fk_telegram_owner_notifications_tenant_owner",
             ondelete="CASCADE",
         ),
-        ForeignKeyConstraint(
-            ["tenant_id", "appointment_id"],
-            ["appointments.tenant_id", "appointments.id"],
-            name="fk_telegram_owner_notifications_tenant_appointment",
-            ondelete="CASCADE",
-        ),
         UniqueConstraint(
             "tenant_id", "owner_user_id", "appointment_id",
             name="uq_telegram_owner_notifications_appointment_owner",
@@ -75,7 +69,9 @@ class TelegramOwnerNotification(UUIDPrimaryKey, TimestampMixin, Base):
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     owner_user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
-    appointment_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    appointment_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("appointments.id", ondelete="CASCADE"), nullable=False
+    )
     status: Mapped[Literal["queued", "sending", "sent", "failed", "unknown"]] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")
     )
