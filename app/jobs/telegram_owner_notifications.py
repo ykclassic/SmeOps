@@ -10,6 +10,7 @@ from app.db.session import AsyncSessionFactory
 from app.integrations.telegram_bot import (
     TelegramAPIError,
     TelegramDeliveryUnknown,
+    TelegramSendRejected,
     send_text_message,
 )
 from app.jobs.queue import ClaimedJob
@@ -116,7 +117,7 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
             chat_id=chat_id,
             body=body,
         )
-    except TelegramAPIError:
+    except (TelegramAPIError, TelegramSendRejected):
         status_value = "failed"
         error_code = "provider_rejected"
         provider_message_id = None
