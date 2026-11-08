@@ -4,9 +4,9 @@ import pytest
 from app.integrations.telegram_bot import (
     TelegramDeliveryUnknown,
     TelegramSendRejected,
-    send_text_message,
     get_bot_identity,
     register_webhook,
+    send_text_message,
 )
 
 
