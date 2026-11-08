@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.models import (
     Appointment,
     AuditEvent,
@@ -253,6 +254,11 @@ async def create_appointment_booking(
         )
     )
     await session.flush()
+    await enqueue_appointment_owner_alerts(
+        session,
+        tenant_id=tenant_id,
+        appointment_id=appointment.id,
+    )
     return appointment
 
 
