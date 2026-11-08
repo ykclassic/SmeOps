@@ -147,6 +147,12 @@ class TelegramConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):
 class TelegramOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "telegram_outbound_messages"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "conversation_id"],
+            ["telegram_conversations.tenant_id", "telegram_conversations.id"],
+            name="fk_telegram_outbound_messages_tenant_id_telegram_conversations",
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
             "tenant_id", "idempotency_key",
             name="uq_telegram_outbound_tenant_idempotency",
