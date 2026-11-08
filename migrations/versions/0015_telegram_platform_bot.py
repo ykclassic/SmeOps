@@ -3,9 +3,9 @@
 Revision ID: 0015_telegram_platform_bot
 Revises: 0014_telegram_owner_alerts
 
-The migration copies the existing known platform bot credential only when exactly
-one active legacy connection exists and its bot identity is the established
-SmeOps bot. It never calls Telegram or prints credential material.
+The migration promotes the existing credential only when exactly one active legacy
+connection matches the verified SmeOps bot identity. It never calls Telegram or
+prints credential material. Empty databases remain valid for CI and fresh installs.
 """
 from collections.abc import Sequence
 
@@ -34,25 +34,47 @@ def upgrade() -> None:
             "connection matching the established SmeOps bot identity."
         )
 
-    # Empty databases are valid in CI and for a fresh install. The platform bot
-    # remains unconfigured until the operator provisions the centrally managed
-    # credential; production with a legacy bot promotes it below.
     row = rows[0] if rows else None
+
     op.create_table(
         "telegram_platform_bots",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("singleton_key", sa.String(16), server_default="platform", nullable=False),
+        sa.Column(
+            "singleton_key",
+            sa.String(16),
+            server_default="platform",
+            nullable=False,
+        ),
         sa.Column("bot_id", sa.String(80), nullable=False),
         sa.Column("bot_username", sa.String(80), nullable=False),
         sa.Column("bot_token_encrypted", sa.Text(), nullable=False),
         sa.Column("webhook_secret_hash", sa.String(64), nullable=False),
         sa.Column("status", sa.String(16), server_default="active", nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.CheckConstraint("singleton_key = 'platform'", name="ck_telegram_platform_bots_telegram_platform_bot_singleton"),
-        sa.CheckConstraint("status IN ('active', 'disabled')", name="ck_telegram_platform_bots_telegram_platform_bot_status"),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "singleton_key = 'platform'",
+            name="ck_telegram_platform_bots_telegram_platform_bot_singleton",
+        ),
+        sa.CheckConstraint(
+            "status IN ('active', 'disabled')",
+            name="ck_telegram_platform_bots_telegram_platform_bot_status",
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_telegram_platform_bots"),
-        sa.UniqueConstraint("singleton_key", name="uq_telegram_platform_bots_singleton_key"),
+        sa.UniqueConstraint(
+            "singleton_key",
+            name="uq_telegram_platform_bots_singleton_key",
+        ),
         sa.UniqueConstraint("bot_id", name="uq_telegram_platform_bots_bot_id"),
     )
     if row is not None:
@@ -72,16 +94,23 @@ def upgrade() -> None:
             },
         )
 
-    op.add_column("telegram_webhook_events", sa.Column("bot_id", sa.String(80), nullable=True))
+    op.add_column(
+        "telegram_webhook_events",
+        sa.Column("bot_id", sa.String(80), nullable=True),
+    )
     bind.execute(
         sa.text(
-            "UPDATE telegram_webhook_events AS event SET bot_id = connection.bot_id "
-            "FROM telegram_connections AS connection WHERE connection.tenant_id = event.tenant_id"
+            "UPDATE telegram_webhook_events AS event "
+            "SET bot_id = connection.bot_id "
+            "FROM telegram_connections AS connection "
+            "WHERE connection.tenant_id = event.tenant_id"
         )
     )
     op.alter_column("telegram_webhook_events", "bot_id", nullable=False)
     op.create_unique_constraint(
-        "uq_telegram_webhook_events_bot_update", "telegram_webhook_events", ["bot_id", "provider_update_id"]
+        "uq_telegram_webhook_events_bot_update",
+        "telegram_webhook_events",
+        ["bot_id", "provider_update_id"],
     )
 
     op.create_table(
@@ -91,16 +120,33 @@ def upgrade() -> None:
         sa.Column("token_hash", sa.String(64), nullable=False),
         sa.Column("token_encrypted", sa.Text(), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name="pk_telegram_booking_references"),
-        sa.UniqueConstraint("token_hash", name="uq_telegram_booking_references_token_hash"),
-        sa.UniqueConstraint("tenant_id", name="uq_telegram_booking_references_tenant"),
+        sa.UniqueConstraint(
+            "token_hash",
+            name="uq_telegram_booking_references_token_hash",
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            name="uq_telegram_booking_references_tenant",
+        ),
     )
     op.create_index(
         "ix_telegram_booking_references_tenant_active",
-        "telegram_booking_references", ["tenant_id", "revoked_at"],
+        "telegram_booking_references",
+        ["tenant_id", "revoked_at"],
     )
 
     op.create_table(
@@ -110,22 +156,59 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         sa.Column("telegram_user_id", sa.String(80), nullable=False),
         sa.Column("telegram_chat_id", sa.String(80), nullable=False),
-        sa.Column("selected_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(["platform_bot_id"], ["telegram_platform_bots.id"], ondelete="CASCADE"),
+        sa.Column(
+            "selected_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["platform_bot_id"],
+            ["telegram_platform_bots.id"],
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name="pk_telegram_chat_contexts"),
-        sa.UniqueConstraint("platform_bot_id", "telegram_chat_id", name="uq_telegram_chat_contexts_bot_chat"),
+        sa.UniqueConstraint(
+            "platform_bot_id",
+            "telegram_chat_id",
+            name="uq_telegram_chat_contexts_bot_chat",
+        ),
     )
-    op.create_index("ix_telegram_chat_contexts_tenant", "telegram_chat_contexts", ["tenant_id"])
+    op.create_index(
+        "ix_telegram_chat_contexts_tenant",
+        "telegram_chat_contexts",
+        ["tenant_id"],
+    )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_telegram_webhook_events_bot_update", "telegram_webhook_events", type_="unique")
+    op.drop_constraint(
+        "uq_telegram_webhook_events_bot_update",
+        "telegram_webhook_events",
+        type_="unique",
+    )
     op.drop_column("telegram_webhook_events", "bot_id")
-    op.drop_index("ix_telegram_chat_contexts_tenant", table_name="telegram_chat_contexts")
+    op.drop_index(
+        "ix_telegram_chat_contexts_tenant",
+        table_name="telegram_chat_contexts",
+    )
     op.drop_table("telegram_chat_contexts")
-    op.drop_index("ix_telegram_booking_references_tenant_active", table_name="telegram_booking_references")
+    op.drop_index(
+        "ix_telegram_booking_references_tenant_active",
+        table_name="telegram_booking_references",
+    )
     op.drop_table("telegram_booking_references")
     op.drop_table("telegram_platform_bots")
