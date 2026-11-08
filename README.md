@@ -4,9 +4,9 @@ SmeOps is a multi-tenant WhatsApp business assistant for appointment-based and r
 
 ## Delivery status
 
-The repository now contains a working backend foundation, a deterministic salon booking conversation, an owner dashboard, and a Meta Embedded Signup v4 integration. The work is being delivered through stacked draft pull requests and CI-validated increments.
+The repository contains a multi-tenant booking backend, an owner dashboard, WhatsApp Cloud API onboarding/inbox capabilities, and a shared Telegram platform-bot integration. Appointment lifecycle work is being introduced in focused, CI-validated increments.
 
-**This is not yet a production-accepted service.** The Meta integration has mocked CI coverage but has not been verified against the operator's real Meta app or a live business number. Production secrets, managed database, deployed API/worker/frontend, backups and real customer-journey acceptance are still required.
+**Production acceptance remains separate from feature implementation.** Telegram customer booking and owner alerts have been exercised by the operator, and the shared-bot backend has been deployed to the Render staging service. This does not establish full production readiness or complete security acceptance. WhatsApp Embedded Signup is implemented but Meta business verification and live business-number acceptance remain outstanding. Deployment, database durability, backups, monitoring and full end-to-end acceptance must be assessed independently.
 
 ## Current capabilities
 
@@ -18,6 +18,10 @@ The repository now contains a working backend foundation, a deterministic salon 
 - Encrypted customer phone numbers and message bodies, conversation history, opt-out state and 24-hour customer-service-window enforcement.
 - Durable outbound message ledger with safe retry behavior and Meta delivery-status reconciliation.
 - Deterministic salon booking conversation: service selection, customer name, date, availability options, explicit customer confirmation and appointment creation.
+- Shared SmeOps Telegram platform bot (`@smeops_bot`) for tenant-specific customer booking links and private owner linking; owners do not provision bots or manage bot tokens.
+- Telegram webhook update deduplication, tenant-bound customer chat context, separate owner/customer deep-link namespaces and durable owner appointment-alert delivery.
+- Telegram startup webhook reconciliation with bot identity verification, `getWebhookInfo` inspection and idempotent webhook registration.
+- Appointment lifecycle foundation in progress: appointment detail lookup, rescheduling with availability/conflict revalidation, completed/missed states, lifecycle timestamps and audit events.
 - Optional OpenAI Responses API structured intent classification. The model cannot access the database, choose availability, change prices, or create bookings.
 - Human escalation and audited owner/manager resolution.
 - Next.js owner dashboard for appointments, services, opening hours, WhatsApp inbox and connection setup.
@@ -31,12 +35,17 @@ The repository now contains a working backend foundation, a deterministic salon 
 - **API:** Python 3.12 and FastAPI.
 - **Database:** PostgreSQL 16, SQLAlchemy 2.x and Alembic.
 - **Worker:** Separate Python process claims persisted jobs using PostgreSQL row locking and SKIP LOCKED.
-- **WhatsApp:** Meta Cloud API through a provider adapter and Embedded Signup v4.
+- **WhatsApp:** Meta Cloud API through a provider adapter and Embedded Signup v4. Existing WhatsApp onboarding, inbox, webhook, outbound messaging, encryption, opt-out and delivery-status functionality remains part of the product.
+- **Telegram:** Centrally managed shared platform bot, tenant-specific deep links, shared webhook, durable inbound/outbound processing and owner appointment alerts.
 - **AI:** Optional OpenAI Responses API adapter for intent classification only. Deterministic application services remain authoritative.
 
-The customer journey is:
+The WhatsApp customer journey is:
 
 `WhatsApp inbound → signed webhook → persisted event → inbound worker → conversation state machine → deterministic availability/booking service → persisted appointment → outbound queue → Meta Cloud API → delivery webhook → owner dashboard`
+
+The Telegram customer journey is:
+
+`Tenant booking deep link → @smeops_bot private chat → shared Telegram webhook → globally deduplicated update → tenant-bound chat context → shared deterministic conversation engine → transactional booking → persisted appointment → durable Telegram outbound queue → customer confirmation and linked-owner alert`
 
 The model has no database credentials and no direct tool execution. Every booking write requires server-side validation and explicit customer confirmation.
 
@@ -89,7 +98,11 @@ Requirements: Docker Compose, Python 3.12+, Node.js 22+.
 - `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
 - `GET/POST /services`
 - `GET/PUT /business-hours`
-- `GET/POST /appointments`, `POST /appointments/{id}/cancel`
+- `GET/POST /appointments`, `GET /appointments/{id}`, `POST /appointments/{id}/cancel`
+- `POST /appointments/{id}/reschedule`, `POST /appointments/{id}/complete`, `POST /appointments/{id}/missed` (appointment lifecycle increment under development)
+- `GET /telegram/owner-link`, `POST /telegram/owner-link`, `DELETE /telegram/owner-link`
+- `GET /telegram/booking-link`, `POST /telegram/booking-link`
+- `POST /webhooks/telegram/platform` — shared platform-bot webhook.
 - `GET /whatsapp/connection`
 - `POST /whatsapp/embedded-signup`, `POST /whatsapp/connection/complete`, `POST /whatsapp/connection/disconnect`
 - `GET /whatsapp/conversations`
@@ -125,6 +138,12 @@ Frontend:
 
 In production, settings validation fails closed if the database is local or required application/WhatsApp/Meta secrets are missing. Never commit real secrets or expose secrets as `NEXT_PUBLIC_*` variables.
 
+## Telegram integration
+
+SmeOps operates one centrally managed `@smeops_bot` for all connected businesses. An owner authenticates to the dashboard, starts the owner-link flow, and confirms the link in a private Telegram chat. Customers use a tenant-specific opaque booking link. Owner invitation references and customer booking references are separate, single-purpose namespaces. Tenant identity is resolved server-side; invalid or expired references fail closed. Group messages and bot-authored updates are ignored.
+
+The shared webhook is `/webhooks/telegram/platform`. Startup verifies the expected bot identity and reconciles the configured webhook using Telegram's bot API. Update processing is deduplicated globally by platform bot and update ID. Owner alerts use durable jobs and are tenant-scoped. Legacy tenant bot records are retained for compatibility; new owner onboarding does not require BotFather setup or customer-managed bot tokens.
+
 ## WhatsApp onboarding prerequisites
 
 The Meta app owner must complete Meta Business verification, Tech Provider/Solution Partner requirements, app review/Advanced Access, Embedded Signup v4 configuration, allowed domains, and webhook subscriptions. See [docs/whatsapp-onboarding.md](docs/whatsapp-onboarding.md).
@@ -145,7 +164,9 @@ Deploy the API and run migrations before starting the worker. Configure the fron
 ## Known limitations and production gates
 
 - The first salon calendar is a single shared resource. Staff calendars, multiple shifts, breaks and resource assignment are not yet implemented.
+- Appointment lifecycle APIs are being expanded incrementally. Dashboard controls for the full lifecycle and staging acceptance are not complete until the corresponding PRs are merged and verified.
 - WhatsApp booking currently supports service selection, name, date, time-slot selection and explicit confirmation. Customer self-service cancellation/rescheduling, reminders, deposits/payments and multilingual evaluation remain outstanding.
+- Telegram booking uses the shared deterministic conversation engine and sends owner appointment alerts through the shared platform bot. Discord integration is intentionally paused.
 - Approved WhatsApp templates outside the 24-hour service window, template management and self-service re-subscription are not implemented. Free-form messages fail closed outside the service window.
 - Meta token expiry is stored, but automatic token refresh/rotation and alerting are not implemented.
 - Embedded Signup coexistence mode and multiple WhatsApp numbers per tenant are not implemented.
@@ -154,7 +175,9 @@ Deploy the API and run migrations before starting the worker. Configure the fron
 - Email verification, password reset, MFA, refresh-token rotation, staff invitations and account recovery are not implemented.
 - Worker heartbeats and health checks exist, but alert delivery, dashboards for dead-letter queues and queue-age SLOs still need production configuration.
 - Automated backup scheduling, point-in-time recovery validation, restore drills, retention/deletion workflows, load tests and independent security review are not evidenced yet.
-- No live Meta message delivery, public deployment, backup restore or production acceptance is claimed.
+- Meta Business verification is still required before the WhatsApp business onboarding path can be fully accepted. Existing WhatsApp implementation and documentation are retained; do not disable or remove it while verification is pending.
+- Discord integration is on hold and is not part of the current delivery scope.
+- No full production acceptance, complete security audit or backup-restore acceptance is claimed.
 - The manual `Live acceptance tests` GitHub Actions workflow is available for the deployed dashboard/API. It uses GitHub secrets for the test owner account and can verify a completed real WhatsApp booking after the test customer has sent the messages.
 
 ## Engineering rules

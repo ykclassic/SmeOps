@@ -92,3 +92,11 @@ class AppointmentResponse(BaseModel):
     starts_at: AwareDatetime
     ends_at: AwareDatetime
     status: str
+    cancelled_at: AwareDatetime | None = None
+    completed_at: AwareDatetime | None = None
+    missed_at: AwareDatetime | None = None
+    rescheduled_at: AwareDatetime | None = None
+
+
+class AppointmentReschedule(BaseModel):
+    starts_at: AwareDatetime

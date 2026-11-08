@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.schemas.business import (
     AppointmentCreate,
+    AppointmentReschedule,
     AppointmentResponse,
     BusinessHoursReplace,
     BusinessHoursResponse,
@@ -55,6 +56,10 @@ def _appointment_response(appointment: Appointment, customer: Customer) -> Appoi
         starts_at=appointment.starts_at,
         ends_at=appointment.ends_at,
         status=appointment.status,
+        cancelled_at=appointment.cancelled_at,
+        completed_at=appointment.completed_at,
+        missed_at=appointment.missed_at,
+        rescheduled_at=appointment.rescheduled_at,
     )
 
 
@@ -359,7 +364,7 @@ async def list_appointments(
 async def cancel_appointment(
     appointment_id: UUID,
     session: DbSession,
-    user: CurrentUser,
+    user: ManagerOrOwner,
 ) -> AppointmentResponse:
     tenant = await _lock_tenant(session, user.tenant_id)
     result = await session.execute(
@@ -378,7 +383,9 @@ async def cancel_appointment(
     if appointment.status != "confirmed":
         raise HTTPException(status_code=409, detail="Appointment is not cancellable")
 
+    now = datetime.now(UTC)
     appointment.status = "cancelled"
+    appointment.cancelled_at = now
     session.add(
         AuditEvent(
             tenant_id=tenant.id,
@@ -386,8 +393,197 @@ async def cancel_appointment(
             event_type="appointment.cancelled",
             subject_type="appointment",
             subject_id=appointment.id,
-            payload={},
+            payload={"cancelled_at": now.isoformat()},
         )
     )
+    await session.commit()
+    return _appointment_response(appointment, customer)
+
+
+async def _get_locked_appointment(
+    session: DbSession,
+    tenant_id: UUID,
+    appointment_id: UUID,
+) -> tuple[Appointment, Customer]:
+    result = await session.execute(
+        select(Appointment, Customer)
+        .join(Customer, Customer.id == Appointment.customer_id)
+        .where(
+            Appointment.id == appointment_id,
+            Appointment.tenant_id == tenant_id,
+        )
+        .with_for_update(of=Appointment)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return row
+
+
+@router.get("/appointments/{appointment_id}", response_model=AppointmentResponse)
+async def get_appointment(
+    appointment_id: UUID,
+    session: DbSession,
+    user: CurrentUser,
+) -> AppointmentResponse:
+    result = await session.execute(
+        select(Appointment, Customer)
+        .join(Customer, Customer.id == Appointment.customer_id)
+        .where(
+            Appointment.id == appointment_id,
+            Appointment.tenant_id == user.tenant_id,
+        )
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    appointment, customer = row
+    return _appointment_response(appointment, customer)
+
+
+@router.post("/appointments/{appointment_id}/complete", response_model=AppointmentResponse)
+async def complete_appointment(
+    appointment_id: UUID,
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> AppointmentResponse:
+    tenant = await _lock_tenant(session, user.tenant_id)
+    appointment, customer = await _get_locked_appointment(session, tenant.id, appointment_id)
+    if appointment.status != "confirmed":
+        raise HTTPException(
+            status_code=409,
+            detail="Only confirmed appointments can be completed",
+        )
+    now = datetime.now(UTC)
+    appointment.status = "completed"
+    appointment.completed_at = now
+    session.add(AuditEvent(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        event_type="appointment.completed",
+        subject_type="appointment",
+        subject_id=appointment.id,
+        payload={"completed_at": now.isoformat()},
+    ))
+    await session.commit()
+    return _appointment_response(appointment, customer)
+
+
+@router.post("/appointments/{appointment_id}/missed", response_model=AppointmentResponse)
+async def mark_appointment_missed(
+    appointment_id: UUID,
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> AppointmentResponse:
+    tenant = await _lock_tenant(session, user.tenant_id)
+    appointment, customer = await _get_locked_appointment(session, tenant.id, appointment_id)
+    if appointment.status != "confirmed":
+        raise HTTPException(
+            status_code=409,
+            detail="Only confirmed appointments can be marked missed",
+        )
+    now = datetime.now(UTC)
+    appointment.status = "missed"
+    appointment.missed_at = now
+    session.add(AuditEvent(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        event_type="appointment.missed",
+        subject_type="appointment",
+        subject_id=appointment.id,
+        payload={"missed_at": now.isoformat()},
+    ))
+    await session.commit()
+    return _appointment_response(appointment, customer)
+
+
+@router.post("/appointments/{appointment_id}/reschedule", response_model=AppointmentResponse)
+async def reschedule_appointment(
+    appointment_id: UUID,
+    payload: AppointmentReschedule,
+    session: DbSession,
+    user: ManagerOrOwner,
+) -> AppointmentResponse:
+    tenant = await _lock_tenant(session, user.tenant_id)
+    appointment, customer = await _get_locked_appointment(session, tenant.id, appointment_id)
+    if appointment.status != "confirmed":
+        raise HTTPException(
+            status_code=409,
+            detail="Only confirmed appointments can be rescheduled",
+        )
+
+    new_start = payload.starts_at.astimezone(UTC)
+    if new_start == appointment.starts_at:
+        return _appointment_response(appointment, customer)
+    if new_start <= datetime.now(UTC):
+        raise HTTPException(status_code=422, detail="Appointment must be in the future")
+
+    service_result = await session.execute(
+        select(Service).where(
+            Service.id == appointment.service_id,
+            Service.tenant_id == tenant.id,
+        )
+    )
+    service = service_result.scalar_one_or_none()
+    if service is None:
+        raise HTTPException(status_code=409, detail="Appointment service is unavailable")
+
+    new_end = new_start + timedelta(minutes=service.duration_minutes)
+    business_timezone = ZoneInfo(tenant.business_timezone)
+    local_start = new_start.astimezone(business_timezone)
+    local_end = new_end.astimezone(business_timezone)
+    if local_start.date() != local_end.date():
+        raise HTTPException(status_code=409, detail="Appointment cannot cross business days")
+
+    hours_result = await session.execute(
+        select(BusinessHours).where(
+            BusinessHours.tenant_id == tenant.id,
+            BusinessHours.weekday == local_start.weekday(),
+        )
+    )
+    hours = hours_result.scalar_one_or_none()
+    local_start_time = local_start.time().replace(tzinfo=None)
+    local_end_time = local_end.time().replace(tzinfo=None)
+    if (
+        hours is None
+        or hours.is_closed
+        or hours.opens_at is None
+        or hours.closes_at is None
+        or local_start_time < hours.opens_at
+        or local_end_time > hours.closes_at
+    ):
+        raise HTTPException(status_code=409, detail="Requested time is outside business hours")
+
+    overlap_result = await session.execute(
+        select(Appointment.id).where(
+            Appointment.tenant_id == tenant.id,
+            Appointment.id != appointment.id,
+            Appointment.status == "confirmed",
+            Appointment.starts_at < new_end,
+            Appointment.ends_at > new_start,
+        ).limit(1)
+    )
+    if overlap_result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Requested time is no longer available")
+
+    old_start, old_end = appointment.starts_at, appointment.ends_at
+    now = datetime.now(UTC)
+    appointment.starts_at = new_start
+    appointment.ends_at = new_end
+    appointment.rescheduled_at = now
+    session.add(AuditEvent(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        event_type="appointment.rescheduled",
+        subject_type="appointment",
+        subject_id=appointment.id,
+        payload={
+            "previous_starts_at": old_start.isoformat(),
+            "previous_ends_at": old_end.isoformat(),
+            "starts_at": new_start.isoformat(),
+            "ends_at": new_end.isoformat(),
+            "rescheduled_at": now.isoformat(),
+        },
+    ))
     await session.commit()
     return _appointment_response(appointment, customer)
