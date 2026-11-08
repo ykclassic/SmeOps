@@ -403,21 +403,6 @@ def _telegram_webhook_secret(bot_id: str) -> str:
     ).hexdigest()
 
 
-async def _register_connection_webhook(connection: TelegramConnection) -> None:
-    settings = get_settings()
-    if settings.public_api_base_url is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PUBLIC_API_BASE_URL must be configured before connecting Telegram",
-        )
-    token = decrypt_telegram_secret(connection.bot_token_encrypted)
-    await register_webhook(
-        bot_token=token,
-        webhook_url=f"{settings.public_api_base_url}/webhooks/telegram/{connection.bot_id}",
-        secret_token=_telegram_webhook_secret(connection.bot_id),
-    )
-
-
 @router.get("/telegram/connection", response_model=TelegramConnectionResponse | None)
 async def get_telegram_connection(
     session: DbSession,
