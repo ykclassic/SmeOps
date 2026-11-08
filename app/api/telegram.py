@@ -30,6 +30,8 @@ from app.models import (
     AuditEvent,
     TelegramConnection,
     TelegramOwnerLink,
+    TelegramPlatformBot,
+    TelegramBookingReference,
     TelegramWebhookEvent,
     User,
 )
@@ -398,15 +400,15 @@ async def create_telegram_owner_link(
     session: DbSession,
     user: OwnerOnly,
 ) -> dict[str, str | bool]:
-    connection_result = await session.execute(
-        select(TelegramConnection).where(
-            TelegramConnection.tenant_id == user.tenant_id,
-            TelegramConnection.status == "active",
+    platform_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
         )
     )
-    connection = connection_result.scalar_one_or_none()
-    if connection is None or not connection.bot_username:
-        raise HTTPException(status_code=409, detail="An active Telegram bot is required")
+    platform_bot = platform_result.scalar_one_or_none()
+    if platform_bot is None:
+        raise HTTPException(status_code=503, detail="SmeOps Telegram is temporarily unavailable")
 
     result = await session.execute(
         select(TelegramOwnerLink)
@@ -447,7 +449,7 @@ async def create_telegram_owner_link(
         "linked": False,
         "status": "pending",
         "expires_at": expires_at.isoformat(),
-        "deep_link": f"https://t.me/{connection.bot_username}?start={token}",
+        "deep_link": f"https://t.me/{platform_bot.bot_username}?start={token}",
     }
 
 
@@ -496,3 +498,70 @@ async def disconnect_telegram_owner_link(
         link.expires_at = datetime.now(UTC)
         await session.commit()
     return {"status": "disconnected"}
+
+
+@router.get("/telegram/booking-link")
+async def get_telegram_booking_link(
+    session: DbSession,
+    user: OwnerOnly,
+) -> dict[str, str | bool | None]:
+    platform_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
+        )
+    )
+    platform_bot = platform_result.scalar_one_or_none()
+    if platform_bot is None:
+        return {"connected": False, "booking_link": None}
+    result = await session.execute(
+        select(TelegramBookingReference).where(
+            TelegramBookingReference.tenant_id == user.tenant_id,
+            TelegramBookingReference.revoked_at.is_(None),
+        )
+    )
+    reference = result.scalar_one_or_none()
+    if reference is None:
+        return {"connected": True, "booking_link": None}
+    # The opaque token is intentionally not recoverable from its stored hash.
+    return {"connected": True, "booking_link": None, "requires_regeneration": True}
+
+
+@router.post("/telegram/booking-link")
+async def regenerate_telegram_booking_link(
+    session: DbSession,
+    user: OwnerOnly,
+) -> dict[str, str | bool]:
+    platform_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
+        )
+    )
+    platform_bot = platform_result.scalar_one_or_none()
+    if platform_bot is None:
+        raise HTTPException(status_code=503, detail="SmeOps Telegram is temporarily unavailable")
+
+    result = await session.execute(
+        select(TelegramBookingReference)
+        .where(TelegramBookingReference.tenant_id == user.tenant_id)
+        .with_for_update()
+    )
+    reference = result.scalar_one_or_none()
+    token = secrets.token_urlsafe(24)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    if reference is None:
+        reference = TelegramBookingReference(
+            tenant_id=user.tenant_id,
+            token_hash=token_hash,
+        )
+    else:
+        reference.token_hash = token_hash
+        reference.revoked_at = None
+    session.add(reference)
+    await session.commit()
+    return {
+        "connected": True,
+        "booking_link": f"https://t.me/{platform_bot.bot_username}?start={token}",
+        "status": "active",
+    }
