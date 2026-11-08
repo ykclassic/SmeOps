@@ -14,7 +14,7 @@ from app.integrations.telegram_bot import (
 )
 from app.jobs.queue import ClaimedJob
 from app.models import (
-    TelegramConnection,
+    TelegramPlatformBot,
     TelegramConversationMessage,
     TelegramOutboundMessage,
 )
@@ -53,21 +53,21 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
         if message.status != "queued":
             raise ValueError("Outbound Telegram message is not sendable")
 
-        connection_result = await session.execute(
-            select(TelegramConnection).where(
-                TelegramConnection.tenant_id == job.tenant_id,
-                TelegramConnection.status == "active",
+        platform_result = await session.execute(
+            select(TelegramPlatformBot).where(
+                TelegramPlatformBot.singleton_key == "platform",
+                TelegramPlatformBot.status == "active",
             )
         )
-        connection = connection_result.scalar_one_or_none()
-        if connection is None:
+        platform_bot = platform_result.scalar_one_or_none()
+        if platform_bot is None:
             message.status = "failed"
-            message.last_error_code = "connection_unavailable"
+            message.last_error_code = "platform_bot_unavailable"
             await _sync_history(session, job.tenant_id, message)
             await session.commit()
             return
 
-        bot_token = decrypt_telegram_secret(connection.bot_token_encrypted)
+        bot_token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
         chat_id = message.recipient_chat_id
         body = decrypt_telegram_secret(message.body_encrypted)
         message.status = "sending"
