@@ -2,6 +2,7 @@ from app.models.auth_rate_limit import AuthRateLimitBucket
 from app.models.business import Appointment, AuditEvent, BusinessHours, Customer, Service
 from app.models.jobs import BackgroundJob
 from app.models.retail import Order, OrderItem, Product
+from app.models.telegram_owner import TelegramOwnerLink, TelegramOwnerNotification
 from app.models.telegram import (
     TelegramConnection,
     TelegramConversation,
@@ -32,6 +33,8 @@ __all__ = [
     "Service",
     "Tenant",
     "TelegramConnection",
+    "TelegramOwnerLink",
+    "TelegramOwnerNotification",
     "TelegramConversation",
     "TelegramConversationMessage",
     "TelegramOutboundMessage",
