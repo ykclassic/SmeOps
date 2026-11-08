@@ -488,7 +488,7 @@ async def create_telegram_owner_link(
     ):
         return {"linked": True, "status": "active"}
 
-    token = secrets.token_urlsafe(24)
+    token = f"owner_{secrets.token_urlsafe(24)}"
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     expires_at = datetime.now(UTC) + timedelta(minutes=15)
     if link is None:
@@ -614,7 +614,7 @@ async def regenerate_telegram_booking_link(
         .with_for_update()
     )
     reference = result.scalar_one_or_none()
-    token = secrets.token_urlsafe(24)
+    token = f"book_{secrets.token_urlsafe(24)}"
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     if reference is None:
         reference = TelegramBookingReference(
