@@ -1,5 +1,6 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,10 +19,8 @@ from app.models import (
     Customer,
     TelegramConversationMessage,
     TelegramOutboundMessage,
-    TelegramOwnerLink,
     TelegramOwnerNotification,
     Tenant,
-    User,
 )
 from app.services.conversation_engine import process_telegram_conversation_job
 from app.services.salon_booking import (
@@ -120,31 +119,6 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             assert provision.status_code == 202
             assert provision.json()["status"] == "active"
 
-            async def link_test_owner():
-                async with AsyncSessionFactory() as session:
-                    owner_result = await session.execute(
-                        select(User).where(
-                            User.tenant_id == tenant_id,
-                            User.role == "owner",
-                            User.status == "active",
-                        )
-                    )
-                    owner = owner_result.scalar_one()
-                    now = datetime.now(UTC)
-                    session.add(
-                        TelegramOwnerLink(
-                            tenant_id=tenant_id,
-                            owner_user_id=owner.id,
-                            invitation_hash=uuid4().hex * 2,
-                            expires_at=now + timedelta(minutes=15),
-                            chat_id=str(chat_id),
-                            linked_at=now,
-                        )
-                    )
-                    await session.commit()
-
-            asyncio.run(link_test_owner())
-
             async def find_job(job_type: str, idempotency_key: str) -> ClaimedJob:
                 async with AsyncSessionFactory() as session:
                     result = await session.execute(
@@ -163,6 +137,38 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         attempts=1,
                         max_attempts=job.max_attempts,
                     )
+
+            link_response = client.post("/telegram/owner-link", headers=auth)
+            assert link_response.status_code == 200
+            assert link_response.json()["status"] == "pending"
+            start_token = parse_qs(urlparse(link_response.json()["deep_link"]).query)["start"][0]
+            owner_update_id = 799999
+            owner_link_payload = {
+                "update_id": owner_update_id,
+                "message": {
+                    "message_id": 900,
+                    "date": int(datetime.now(UTC).timestamp()),
+                    "chat": {"id": chat_id, "type": "private"},
+                    "from": {"id": user_id, "is_bot": False, "first_name": "Ada"},
+                    "text": f"/start {start_token}",
+                },
+            }
+            owner_link_response = client.post(
+                "/webhooks/telegram/123456789",
+                json=owner_link_payload,
+                headers={
+                    "X-Telegram-Bot-Api-Secret-Token":
+                    telegram_api._telegram_webhook_secret("123456789")
+                },
+            )
+            assert owner_link_response.status_code == 200
+            owner_link_job = asyncio.run(
+                find_job("telegram.accept_inbound", f"tg:update:{owner_update_id}")
+            )
+            asyncio.run(accept_inbound_telegram_job(owner_link_job))
+            owner_link_status = client.get("/telegram/owner-link", headers=auth)
+            assert owner_link_status.status_code == 200
+            assert owner_link_status.json()["linked"] is True
 
             def send_customer_message(text: str, sequence: int) -> str:
                 update_id = 800000 + sequence
