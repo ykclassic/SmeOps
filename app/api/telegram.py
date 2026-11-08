@@ -16,7 +16,6 @@ from app.core.config import get_settings
 from app.core.telegram import (
     decrypt_telegram_secret,
     encrypt_telegram_secret,
-    hash_telegram_webhook_secret,
     verify_telegram_webhook_secret,
 )
 from app.integrations.telegram_bot import (
