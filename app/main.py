@@ -9,8 +9,8 @@ from app.api.business import router as business_router
 from app.api.health import router as health_router
 from app.api.ops import router as ops_router
 from app.api.retail import router as retail_router
-from app.api.whatsapp import router as whatsapp_router
 from app.api.telegram import router as telegram_router
+from app.api.whatsapp import router as whatsapp_router
 from app.core.config import get_settings
 from app.db.session import engine
 from app.worker import run_embedded_worker
