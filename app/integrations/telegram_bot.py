@@ -52,7 +52,7 @@ async def send_text_message(
         message_id = data["result"]["message_id"]
     except TelegramSendRejected:
         raise
-    except (ValueError, KeyError, TypeError) as exc:
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise TelegramDeliveryUnknown(
             "Telegram response did not confirm a message ID"
         ) from exc
