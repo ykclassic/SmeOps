@@ -1,22 +1,43 @@
 import hashlib
+import hmac
 import json
 import logging
 from uuid import uuid4
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.dependencies import DbSession
+from typing import Annotated
+
+from app.api.dependencies import DbSession, require_roles
 from app.core.telegram import (
     encrypt_telegram_secret,
     verify_telegram_webhook_secret,
+    decrypt_telegram_secret,
 )
 from app.jobs.queue import enqueue_job
-from app.models import TelegramConnection, TelegramWebhookEvent
+from app.models import AuditEvent, TelegramConnection, TelegramWebhookEvent, User
+from app.integrations.telegram_bot import (
+    TelegramAPIError,
+    TelegramDeliveryUnknown,
+    get_bot_identity,
+    register_webhook,
+)
+from app.schemas.telegram import (
+    TelegramConnectionProvision,
+    TelegramConnectionResponse,
+    TelegramOutboundMessageResponse,
+    TelegramTextMessageRequest,
+)
+from app.services.telegram_outbound import (
+    TelegramOutboundIdempotencyConflict,
+    enqueue_telegram_text,
+)
 
 router = APIRouter(tags=["telegram integration"])
 logger = logging.getLogger(__name__)
+OwnerOnly = Annotated[User, Depends(require_roles("owner"))]
 MAX_TELEGRAM_WEBHOOK_BYTES = 1_000_000
 
 
@@ -158,3 +179,182 @@ async def receive_telegram_webhook(
     )
     await session.commit()
     return {"status": "accepted", "queued_events": 1}
+
+
+
+def _telegram_webhook_secret(bot_id: str) -> str:
+    key = get_settings().app_secret_key.get_secret_value().encode()
+    return hmac.new(
+        key,
+        f"smeops:telegram:webhook:{bot_id}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+async def _register_connection_webhook(connection: TelegramConnection) -> None:
+    settings = get_settings()
+    if settings.public_api_base_url is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PUBLIC_API_BASE_URL must be configured before connecting Telegram",
+        )
+    token = decrypt_telegram_secret(connection.bot_token_encrypted)
+    await register_webhook(
+        bot_token=token,
+        webhook_url=f"{settings.public_api_base_url}/webhooks/telegram/{connection.bot_id}",
+        secret_token=_telegram_webhook_secret(connection.bot_id),
+    )
+
+
+@router.post(
+    "/telegram/connection",
+    response_model=TelegramConnectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def provision_telegram_connection(
+    payload: TelegramConnectionProvision,
+    session: DbSession,
+    user: OwnerOnly,
+) -> TelegramConnectionResponse:
+    settings = get_settings()
+    if settings.whatsapp_token_encryption_key is None:
+        raise HTTPException(status_code=503, detail="Channel token encryption is not configured")
+    if settings.public_api_base_url is None:
+        raise HTTPException(status_code=503, detail="PUBLIC_API_BASE_URL is not configured")
+
+    token = payload.bot_token.get_secret_value()
+    try:
+        identity = await get_bot_identity(bot_token=token)
+    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError):
+        raise HTTPException(status_code=502, detail="Telegram bot credentials could not be verified") from None
+
+    result = await session.execute(
+        select(TelegramConnection)
+        .where(TelegramConnection.tenant_id == user.tenant_id)
+        .with_for_update()
+    )
+    connection = result.scalar_one_or_none()
+    if connection is not None and connection.bot_id != identity.bot_id:
+        raise HTTPException(status_code=409, detail="Disconnect the existing Telegram bot first")
+
+    if connection is None:
+        connection = TelegramConnection(
+            tenant_id=user.tenant_id,
+            bot_id=identity.bot_id,
+            bot_username=identity.username,
+            bot_token_encrypted=encrypt_telegram_secret(token),
+            webhook_secret_hash=hash_telegram_webhook_secret(_telegram_webhook_secret(identity.bot_id)),
+            status="pending",
+        )
+    else:
+        connection.bot_username = identity.username
+        connection.bot_token_encrypted = encrypt_telegram_secret(token)
+        connection.webhook_secret_hash = hash_telegram_webhook_secret(_telegram_webhook_secret(identity.bot_id))
+        connection.status = "pending"
+
+    session.add(connection)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="This Telegram bot is already connected to another workspace") from None
+
+    try:
+        await _register_connection_webhook(connection)
+    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError, HTTPException):
+        logger.warning("Telegram webhook registration remains pending", extra={"bot_id": identity.bot_id})
+        return TelegramConnectionResponse(
+            bot_id=connection.bot_id,
+            bot_username=connection.bot_username,
+            status="pending",
+        )
+
+    connection.status = "active"
+    session.add(AuditEvent(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        event_type="telegram.connection.provisioned",
+        subject_type="telegram_connection",
+        subject_id=connection.id,
+        payload={"bot_id": connection.bot_id},
+    ))
+    await session.commit()
+    return TelegramConnectionResponse(
+        bot_id=connection.bot_id,
+        bot_username=connection.bot_username,
+        status=connection.status,
+    )
+
+
+@router.post(
+    "/telegram/connection/complete",
+    response_model=TelegramConnectionResponse,
+)
+async def complete_telegram_connection(
+    session: DbSession,
+    user: OwnerOnly,
+) -> TelegramConnectionResponse:
+    result = await session.execute(
+        select(TelegramConnection)
+        .where(TelegramConnection.tenant_id == user.tenant_id, TelegramConnection.status == "pending")
+        .with_for_update()
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(status_code=409, detail="There is no pending Telegram connection")
+    try:
+        await _register_connection_webhook(connection)
+    except (TelegramAPIError, TelegramDeliveryUnknown, ValueError, HTTPException):
+        await session.rollback()
+        raise HTTPException(status_code=502, detail="Telegram webhook registration is still pending") from None
+    connection.status = "active"
+    await session.commit()
+    return TelegramConnectionResponse(
+        bot_id=connection.bot_id,
+        bot_username=connection.bot_username,
+        status=connection.status,
+    )
+
+
+@router.get("/telegram/connection", response_model=TelegramConnectionResponse | None)
+async def get_telegram_connection(
+    session: DbSession,
+    user: OwnerOnly,
+) -> TelegramConnectionResponse | None:
+    result = await session.execute(
+        select(TelegramConnection).where(TelegramConnection.tenant_id == user.tenant_id)
+    )
+    connection = result.scalar_one_or_none()
+    if connection is None:
+        return None
+    return TelegramConnectionResponse(
+        bot_id=connection.bot_id,
+        bot_username=connection.bot_username,
+        status=connection.status,
+    )
+
+
+@router.post(
+    "/telegram/messages",
+    response_model=TelegramOutboundMessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_telegram_text_message(
+    payload: TelegramTextMessageRequest,
+    session: DbSession,
+    user: OwnerOnly,
+) -> TelegramOutboundMessageResponse:
+    try:
+        message = await enqueue_telegram_text(
+            session,
+            tenant_id=user.tenant_id,
+            conversation_id=payload.conversation_id,
+            body=payload.body,
+            idempotency_key=str(payload.idempotency_key),
+            actor_user_id=user.id,
+        )
+    except TelegramOutboundIdempotencyConflict:
+        raise HTTPException(status_code=409, detail="Idempotency key was used for different content") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return TelegramOutboundMessageResponse(id=message.id, status=message.status)
