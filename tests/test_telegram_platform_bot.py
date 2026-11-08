@@ -59,7 +59,7 @@ def client_for(session):
 def platform_bot():
     return SimpleNamespace(
         id=uuid4(),
-        bot_id="901662451",
+        bot_id="9016622451",
         bot_username="smeops_bot",
         status="active",
         webhook_secret_hash=hash_telegram_webhook_secret("platform-secret"),
@@ -104,9 +104,9 @@ def test_shared_bot_resolves_booking_link_and_queues_tenant_scoped_event(monkeyp
     assert len(session.records) == 2  # selected chat context and webhook event
     event = next(record for record in session.records if hasattr(record, "provider_update_id"))
     assert event.tenant_id == tenant_id
-    assert event.bot_id == "901662451"
+    assert event.bot_id == "9016622451"
     assert jobs[0]["tenant_id"] == tenant_id
-    assert jobs[0]["idempotency_key"] == "tg:platform:901662451:100"
+    assert jobs[0]["idempotency_key"] == "tg:platform:9016622451:100"
 
 
 def test_invalid_booking_reference_never_falls_back_to_existing_chat_context():
