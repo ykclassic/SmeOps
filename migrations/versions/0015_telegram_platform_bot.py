@@ -68,6 +68,18 @@ def upgrade() -> None:
         },
     )
 
+    op.add_column("telegram_webhook_events", sa.Column("bot_id", sa.String(80), nullable=True))
+    bind.execute(
+        sa.text(
+            "UPDATE telegram_webhook_events AS event SET bot_id = connection.bot_id "
+            "FROM telegram_connections AS connection WHERE connection.tenant_id = event.tenant_id"
+        )
+    )
+    op.alter_column("telegram_webhook_events", "bot_id", nullable=False)
+    op.create_unique_constraint(
+        "uq_telegram_webhook_events_bot_update", "telegram_webhook_events", ["bot_id", "provider_update_id"]
+    )
+
     op.create_table(
         "telegram_booking_references",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -106,6 +118,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_constraint("uq_telegram_webhook_events_bot_update", "telegram_webhook_events", type_="unique")
+    op.drop_column("telegram_webhook_events", "bot_id")
     op.drop_index("ix_telegram_chat_contexts_tenant", table_name="telegram_chat_contexts")
     op.drop_table("telegram_chat_contexts")
     op.drop_index("ix_telegram_booking_references_tenant_active", table_name="telegram_booking_references")
