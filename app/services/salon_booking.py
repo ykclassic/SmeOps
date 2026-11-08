@@ -93,7 +93,7 @@ async def get_available_slots(
     return available
 
 
-async def create_whatsapp_booking(
+async def create_appointment_booking(
     session: AsyncSession,
     *,
     tenant_id: UUID,
@@ -103,6 +103,7 @@ async def create_whatsapp_booking(
     starts_at: datetime,
     conversation_id: UUID,
     booking_attempt_id: UUID,
+    source: str = "whatsapp",
 ) -> Appointment:
     tenant_result = await session.execute(
         select(Tenant)
@@ -243,7 +244,7 @@ async def create_whatsapp_booking(
             subject_type="appointment",
             subject_id=appointment.id,
             payload={
-                "source": "whatsapp",
+                "source": source,
                 "conversation_id": str(conversation_id),
                 "service_id": str(service_id),
                 "starts_at": starts_at.isoformat(),
@@ -283,3 +284,7 @@ def parse_booking_date(value: str, *, timezone: ZoneInfo, now: datetime) -> date
         days_ahead = (target - local_today.weekday()) % 7
         return local_today + timedelta(days=days_ahead or 7)
     return None
+
+
+# Backwards-compatible entry point for existing WhatsApp callers and tests.
+create_whatsapp_booking = create_appointment_booking
