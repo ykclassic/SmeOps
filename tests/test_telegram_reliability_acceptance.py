@@ -96,6 +96,7 @@ def client_for(session):
 def connection():
     return SimpleNamespace(
         tenant_id=uuid4(),
+        bot_id="9016622451",
         webhook_secret_hash=hash_telegram_webhook_secret("valid-secret"),
     )
 
