@@ -48,7 +48,12 @@ def _format_price(price_minor: int) -> str:
     return f"₦{naira:,.2f}"
 
 
-async def _service_menu(session: AsyncSession, tenant_id: UUID) -> tuple[list[Service], str]:
+async def _service_menu(
+    session: AsyncSession,
+    tenant_id: UUID,
+    *,
+    business_name: str | None = None,
+) -> tuple[list[Service], str]:
     result = await session.execute(
         select(Service)
         .where(Service.tenant_id == tenant_id, Service.is_active.is_(True))
@@ -56,11 +61,17 @@ async def _service_menu(session: AsyncSession, tenant_id: UUID) -> tuple[list[Se
     )
     services = list(result.scalars().all())
     if not services:
+        business_label = f"{business_name} has" if business_name else "This business has"
         return services, (
-            "The salon has not published its services yet. "
-            "Please contact the salon team for assistance."
+            f"Welcome to {business_name}. " if business_name else ""
+        ) + (
+            f"{business_label} not published its services yet. "
+            "Please contact the business team for assistance."
         )
-    lines = ["Here are the available services:"]
+    lines = []
+    if business_name:
+        lines.append(f"Welcome to {business_name}.")
+    lines.append("Here are the available services:")
     for index, service in enumerate(services, start=1):
         lines.append(
             f"{index}. {service.name} — {_format_price(service.price_minor)} "
@@ -238,7 +249,7 @@ async def process_channel_conversation_job(
                         None,
                     )
                 if selected is None:
-                    _, reply = await _service_menu(session, job.tenant_id)
+                    _, reply = await _service_menu(session, job.tenant_id, business_name=tenant.name)
                 else:
                     booking.update(
                         {
