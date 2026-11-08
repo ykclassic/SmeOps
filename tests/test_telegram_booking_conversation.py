@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.telegram import decrypt_telegram_secret
+from app.core.telegram import (
+    decrypt_telegram_secret,
+    encrypt_telegram_secret,
+    hash_telegram_webhook_secret,
+)
 from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob
 from app.jobs.telegram import accept_inbound_telegram_job
@@ -20,6 +24,7 @@ from app.models import (
     TelegramConversationMessage,
     TelegramOutboundMessage,
     TelegramOwnerNotification,
+    TelegramPlatformBot,
     Tenant,
 )
 from app.services.conversation_engine import process_telegram_conversation_job
@@ -49,15 +54,14 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
 
     from app.api import telegram as telegram_api
 
-    async def fake_get_bot_identity(*, bot_token):
-        assert bot_token == "123456:telegram-test-token"
-        return type("Identity", (), {"bot_id": "123456789", "username": "smeops_test_bot"})()
-
-    async def fake_register_webhook(_connection):
+    async def fake_ensure_platform_webhook(_platform_bot):
         return None
 
-    monkeypatch.setattr(telegram_api, "get_bot_identity", fake_get_bot_identity)
-    monkeypatch.setattr(telegram_api, "_register_connection_webhook", fake_register_webhook)
+    monkeypatch.setattr(
+        telegram_api,
+        "_ensure_platform_webhook",
+        fake_ensure_platform_webhook,
+    )
 
     slug = f"telegram-booking-{uuid4().hex[:10]}"
     tenant_id: UUID | None = None
@@ -111,13 +115,27 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             )
             assert hours.status_code == 200
 
-            provision = client.post(
-                "/telegram/connection",
-                headers=auth,
-                json={"bot_token": "123456:telegram-test-token"},
-            )
-            assert provision.status_code == 202
-            assert provision.json()["status"] == "active"
+            platform_bot_id = uuid4()
+            async def seed_platform_bot():
+                async with AsyncSessionFactory() as session:
+                    session.add(
+                        TelegramPlatformBot(
+                            id=platform_bot_id,
+                            singleton_key="platform",
+                            bot_id="9016622451",
+                            bot_username="smeops_bot",
+                            bot_token_encrypted=encrypt_telegram_secret(
+                                "123456:telegram-test-token"
+                            ),
+                            webhook_secret_hash=hash_telegram_webhook_secret(
+                                telegram_api._telegram_webhook_secret("9016622451")
+                            ),
+                            status="active",
+                        )
+                    )
+                    await session.commit()
+
+            asyncio.run(seed_platform_bot())
 
             async def find_job(job_type: str, idempotency_key: str) -> ClaimedJob:
                 async with AsyncSessionFactory() as session:
@@ -154,21 +172,58 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                 },
             }
             owner_link_response = client.post(
-                "/webhooks/telegram/123456789",
+                "/webhooks/telegram/platform",
                 json=owner_link_payload,
                 headers={
                     "X-Telegram-Bot-Api-Secret-Token":
-                    telegram_api._telegram_webhook_secret("123456789")
+                    telegram_api._telegram_webhook_secret("9016622451")
                 },
             )
             assert owner_link_response.status_code == 200
             owner_link_job = asyncio.run(
-                find_job("telegram.accept_inbound", f"tg:update:{owner_update_id}")
+                find_job("telegram.accept_inbound", f"tg:platform:9016622451:{owner_update_id}")
             )
             asyncio.run(accept_inbound_telegram_job(owner_link_job))
             owner_link_status = client.get("/telegram/owner-link", headers=auth)
             assert owner_link_status.status_code == 200
             assert owner_link_status.json()["linked"] is True
+
+            booking_link_response = client.post("/telegram/booking-link", headers=auth)
+            assert booking_link_response.status_code == 200
+            booking_token = parse_qs(
+                urlparse(booking_link_response.json()["booking_link"]).query
+            )["start"][0]
+
+            def send_customer_start() -> str:
+                update_id = 800001
+                payload = {
+                    "update_id": update_id,
+                    "message": {
+                        "message_id": 1,
+                        "date": int(datetime.now(UTC).timestamp()),
+                        "chat": {"id": chat_id, "type": "private"},
+                        "from": {
+                            "id": user_id,
+                            "is_bot": False,
+                            "first_name": "Ada",
+                        },
+                        "text": f"/start {booking_token}",
+                    },
+                }
+                response = client.post(
+                    "/webhooks/telegram/platform",
+                    json=payload,
+                    headers={
+                        "X-Telegram-Bot-Api-Secret-Token":
+                        telegram_api._telegram_webhook_secret("9016622451")
+                    },
+                )
+                assert response.status_code == 200, response.text
+                assert response.json()["queued_events"] == 1
+                return str(update_id)
+
+            start_update_id = send_customer_start()
+            asyncio.run(process_inbound(start_update_id, 1))
 
             def send_customer_message(text: str, sequence: int) -> str:
                 update_id = 800000 + sequence
@@ -225,8 +280,8 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                 )
                 await process_telegram_conversation_job(conversation_job)
 
-            steps = ("BOOK", "1", "Ada Lovelace", phone_input, "tomorrow", "1", "YES")
-            for sequence, customer_text in enumerate(steps, start=1):
+            steps = ("1", "Ada Lovelace", phone_input, "tomorrow", "1", "YES")
+            for sequence, customer_text in enumerate(steps, start=2):
                 update_id = send_customer_message(customer_text, sequence)
                 asyncio.run(process_inbound(update_id, sequence))
 
