@@ -149,6 +149,7 @@ export default function HomePage() {
   const [connection, setConnection] = useState<Connection>(null);
   const [telegramOwner, setTelegramOwner] = useState<TelegramOwnerStatus>({ linked: false, status: "disconnected" });
   const [telegramBooking, setTelegramBooking] = useState<TelegramBookingStatus>({ connected: false, booking_link: null });
+  const [telegramOwnerDeepLink, setTelegramOwnerDeepLink] = useState<string | null>(null);
   const [signupPin, setSignupPin] = useState("");
   const signupPinRef = useRef("");
   const signupPartsRef = useRef<{
@@ -459,6 +460,25 @@ export default function HomePage() {
   }, [user, connection?.status]);
 
   useEffect(() => {
+    if (!user || telegramOwner.status !== "pending") return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      const current = await api<TelegramOwnerStatus>("telegram/owner-link").catch(() => null);
+      if (!active || !current) return;
+      setTelegramOwner(current);
+      if (current.linked) {
+        setTelegramOwnerDeepLink(null);
+        setNotice("Telegram owner alerts are connected.");
+        window.clearInterval(timer);
+      }
+    }, 4000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [user, telegramOwner.status]);
+
+  useEffect(() => {
     let mounted = true;
     api<User>("auth/me")
       .then((identity) => {
@@ -534,8 +554,8 @@ export default function HomePage() {
       const result = await api<TelegramOwnerStatus & { deep_link?: string }>("telegram/owner-link", { method: "POST", body: "{}" });
       setTelegramOwner(result);
       if (result.deep_link) {
-        window.open(result.deep_link, "_blank", "noopener,noreferrer");
-        setNotice("Open Telegram and press Start in the SmeOps bot to finish linking.");
+        setTelegramOwnerDeepLink(result.deep_link);
+        setNotice("Open the Telegram link below and press Start in the SmeOps bot to finish linking.");
       } else if (result.linked) {
         setNotice("Telegram owner alerts are already connected.");
       }
@@ -552,6 +572,7 @@ export default function HomePage() {
     try {
       await api("telegram/owner-link", { method: "DELETE" });
       setTelegramOwner({ linked: false, status: "disconnected" });
+      setTelegramOwnerDeepLink(null);
       setNotice("Telegram owner alerts disconnected.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not disconnect Telegram");
@@ -583,6 +604,7 @@ export default function HomePage() {
     setMessages([]);
     setConnection(null);
     setTelegramOwner({ linked: false, status: "disconnected" });
+    setTelegramOwnerDeepLink(null);
     setTelegramBooking({ connected: false, booking_link: null });
   }
 
@@ -877,7 +899,7 @@ export default function HomePage() {
                     <p>Use the SmeOps platform bot. No BotFather setup or bot token is required. After opening Telegram, press Start to link this owner account.</p>
                     {telegramOwner.linked
                       ? <><p className="muted">Linked {telegramOwner.linked_at ? dateTime(telegramOwner.linked_at) : "successfully"}.</p><button className="button button-danger-quiet" onClick={disconnectTelegramOwner} disabled={busy}>Disconnect alerts</button></>
-                      : <button className="button button-primary" onClick={connectTelegramOwner} disabled={busy}>Connect Telegram</button>}
+                      : <><button className="button button-primary" onClick={connectTelegramOwner} disabled={busy}>Connect Telegram</button>{telegramOwnerDeepLink && <a className="button button-quiet" href={telegramOwnerDeepLink} target="_blank" rel="noopener noreferrer">Open Telegram and press Start</a>}</>}
                   </div>
                 </section>
                 <section className="panel whatsapp-panel">
@@ -889,7 +911,7 @@ export default function HomePage() {
                     {telegramBooking.booking_link ? (
                       <div className="connection-details">
                         <label>Share this link<input readOnly value={telegramBooking.booking_link} onFocus={(event) => event.currentTarget.select()} /></label>
-                        <button className="button button-primary" onClick={() => void navigator.clipboard.writeText(telegramBooking.booking_link ?? "").then(() => setNotice("Booking link copied."))}>Copy booking link</button>
+                        <button className="button button-primary" onClick={() => void navigator.clipboard.writeText(telegramBooking.booking_link ?? "").then(() => setNotice("Booking link copied.")).catch(() => setError("Clipboard access was denied. Select and copy the link manually."))}>Copy booking link</button>
                         <button className="button button-quiet" onClick={createTelegramBookingLink} disabled={busy}>Regenerate link</button>
                       </div>
                     ) : <button className="button button-primary" onClick={createTelegramBookingLink} disabled={busy}>Create customer booking link</button>}
