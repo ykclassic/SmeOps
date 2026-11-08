@@ -526,16 +526,24 @@ async def get_telegram_owner_link_status(
         )
     )
     link = result.scalar_one_or_none()
+    now = datetime.now(UTC)
     linked = bool(
         link is not None
         and link.linked_at is not None
         and link.disabled_at is None
         and link.chat_id is not None
     )
+    pending = bool(
+        link is not None
+        and link.linked_at is None
+        and link.disabled_at is None
+        and link.expires_at > now
+    )
     return {
         "linked": linked,
-        "status": "active" if linked else "disconnected",
+        "status": "active" if linked else "pending" if pending else "disconnected",
         "linked_at": link.linked_at.isoformat() if linked and link else None,
+        "expires_at": link.expires_at.isoformat() if pending and link else None,
     }
 
 
