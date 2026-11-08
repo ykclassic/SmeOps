@@ -894,12 +894,12 @@ export default function HomePage() {
                 <section className="panel whatsapp-panel">
                   <div className="whatsapp-illustration">➤</div>
                   <div className="whatsapp-copy">
-                    <span className={telegramOwner.linked ? "pill pill-green" : "pill pill-amber"}>{telegramOwner.linked ? "Connected" : "Not connected"}</span>
+                    <span className={telegramOwner.linked ? "pill pill-green" : "pill pill-amber"}>{telegramOwner.linked ? "Connected" : telegramOwner.status === "pending" ? "Linking" : "Not connected"}</span>
                     <h2>Owner appointment alerts</h2>
                     <p>Use the SmeOps platform bot. No BotFather setup or bot token is required. After opening Telegram, press Start to link this owner account.</p>
                     {telegramOwner.linked
                       ? <><p className="muted">Linked {telegramOwner.linked_at ? dateTime(telegramOwner.linked_at) : "successfully"}.</p><button className="button button-danger-quiet" onClick={disconnectTelegramOwner} disabled={busy}>Disconnect alerts</button></>
-                      : <><button className="button button-primary" onClick={connectTelegramOwner} disabled={busy}>Connect Telegram</button>{telegramOwnerDeepLink && <a className="button button-quiet" href={telegramOwnerDeepLink} target="_blank" rel="noopener noreferrer">Open Telegram and press Start</a>}</>}
+                      : <><button className="button button-primary" onClick={connectTelegramOwner} disabled={busy}>{telegramOwner.status === "pending" ? "Generate a fresh Telegram link" : "Connect Telegram"}</button>{telegramOwnerDeepLink && <a className="button button-quiet" href={telegramOwnerDeepLink} target="_blank" rel="noopener noreferrer">Open Telegram and press Start</a>}</>}
                   </div>
                 </section>
                 <section className="panel whatsapp-panel">
