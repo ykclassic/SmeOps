@@ -42,7 +42,7 @@ async def _persist_telegram_message(session, *, tenant_id: UUID, payload: dict) 
     if any(isinstance(value, bool) or not isinstance(value, int) for value in
            (chat_id, user_id, message_id)):
         return
-    if min(chat_id, user_id, message_id) < 0:
+    if chat_id == 0 or user_id <= 0 or message_id <= 0:
         return
 
     text_body = message.get("text")
