@@ -288,7 +288,10 @@ async def receive_platform_telegram_webhook(
     tenant_id = None
     text_body = message.get("text")
     token = ""
-    if isinstance(text_body, str) and (text_body == "/start" or text_body.startswith("/start ")):
+    is_start_command = isinstance(text_body, str) and (
+        text_body == "/start" or text_body.startswith("/start ")
+    )
+    if is_start_command:
         parts = text_body.split(maxsplit=1)
         token = parts[1].strip() if len(parts) == 2 else ""
     if token and len(token) <= 64:
@@ -333,6 +336,9 @@ async def receive_platform_telegram_webhook(
                     chat_context.telegram_user_id = str(sender_id)
                     chat_context.selected_at = datetime.now(UTC)
                 session.add(chat_context)
+    if is_start_command and tenant_id is None:
+        # Invalid, expired, revoked or missing deep-link tokens never inherit an old chat context.
+        return {"status": "accepted", "queued_events": 0}
     if tenant_id is None:
         context_result = await session.execute(
             select(TelegramChatContext).where(
