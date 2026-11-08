@@ -113,7 +113,7 @@ class Appointment(UUIDPrimaryKey, TimestampMixin, Base):
         ),
         CheckConstraint("ends_at > starts_at", name="appointment_positive_duration"),
         CheckConstraint(
-            "status IN ('confirmed', 'cancelled')",
+            "status IN ('confirmed', 'cancelled', 'completed', 'missed')",
             name="appointment_status_valid",
         ),
         CheckConstraint(
@@ -133,9 +133,13 @@ class Appointment(UUIDPrimaryKey, TimestampMixin, Base):
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[Literal["confirmed", "cancelled"]] = mapped_column(
+    status: Mapped[Literal["confirmed", "cancelled", "completed", "missed"]] = mapped_column(
         String(16), nullable=False, default="confirmed", server_default=text("'confirmed'")
     )
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    missed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rescheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditEvent(UUIDPrimaryKey, Base):
