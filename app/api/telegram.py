@@ -26,12 +26,11 @@ from app.integrations.telegram_bot import (
 )
 from app.jobs.queue import enqueue_job
 from app.models import (
-    AuditEvent,
+    TelegramBookingReference,
+    TelegramChatContext,
     TelegramConnection,
     TelegramOwnerLink,
     TelegramPlatformBot,
-    TelegramBookingReference,
-    TelegramChatContext,
     TelegramWebhookEvent,
     User,
 )
@@ -283,7 +282,12 @@ async def receive_platform_telegram_webhook(
     ):
         return {"status": "accepted", "queued_events": 0}
 
-    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    canonical_payload = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
     payload_hash = hashlib.sha256(canonical_payload.encode()).hexdigest()
     provider_update_id = str(update_id)
     duplicate_result = await session.execute(
