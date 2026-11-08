@@ -66,7 +66,7 @@ class TelegramWebhookEvent(UUIDPrimaryKey, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
-    bot_id: Mapped[str] = mapped_column(String(80), nullable=False, default="901662451")
+    bot_id: Mapped[str] = mapped_column(String(80), nullable=False, default="9016622451")
     provider_update_id: Mapped[str] = mapped_column(String(80), nullable=False)
     event_type: Mapped[str] = mapped_column(String(80), nullable=False)
     payload_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
