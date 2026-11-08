@@ -7,8 +7,8 @@ from uuid import uuid4
 from sqlalchemy import text
 
 from app.db.session import engine
-from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.jobs.telegram import accept_inbound_telegram_job
+from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.jobs.whatsapp_onboarding import complete_whatsapp_onboarding_job
 from app.jobs.whatsapp_outbound import send_outbound_whatsapp_job
 from app.jobs.worker import run_forever
