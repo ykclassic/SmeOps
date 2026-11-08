@@ -215,6 +215,7 @@ class TelegramBookingReference(UUIDPrimaryKey, TimestampMixin, Base):
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
