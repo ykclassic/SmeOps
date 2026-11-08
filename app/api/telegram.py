@@ -11,15 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import DbSession, require_roles
-from app.core.config import get_settings
 from app.core.telegram import (
     decrypt_telegram_secret,
     encrypt_telegram_secret,
     verify_telegram_webhook_secret,
-)
-from app.services.telegram_webhook import (
-    ensure_platform_webhook,
-    platform_webhook_secret,
 )
 from app.jobs.queue import enqueue_job
 from app.models import (
@@ -39,6 +34,10 @@ from app.schemas.telegram import (
 from app.services.telegram_outbound import (
     TelegramOutboundIdempotencyConflict,
     enqueue_telegram_text,
+)
+from app.services.telegram_webhook import (
+    ensure_platform_webhook,
+    platform_webhook_secret,
 )
 
 router = APIRouter(tags=["telegram integration"])
