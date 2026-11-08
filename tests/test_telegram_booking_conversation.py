@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,6 +19,7 @@ from app.models import (
     Customer,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramOwnerNotification,
     Tenant,
 )
 from app.services.conversation_engine import process_telegram_conversation_job
@@ -136,6 +138,38 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         max_attempts=job.max_attempts,
                     )
 
+            link_response = client.post("/telegram/owner-link", headers=auth)
+            assert link_response.status_code == 200
+            assert link_response.json()["status"] == "pending"
+            start_token = parse_qs(urlparse(link_response.json()["deep_link"]).query)["start"][0]
+            owner_update_id = 799999
+            owner_link_payload = {
+                "update_id": owner_update_id,
+                "message": {
+                    "message_id": 900,
+                    "date": int(datetime.now(UTC).timestamp()),
+                    "chat": {"id": chat_id, "type": "private"},
+                    "from": {"id": user_id, "is_bot": False, "first_name": "Ada"},
+                    "text": f"/start {start_token}",
+                },
+            }
+            owner_link_response = client.post(
+                "/webhooks/telegram/123456789",
+                json=owner_link_payload,
+                headers={
+                    "X-Telegram-Bot-Api-Secret-Token":
+                    telegram_api._telegram_webhook_secret("123456789")
+                },
+            )
+            assert owner_link_response.status_code == 200
+            owner_link_job = asyncio.run(
+                find_job("telegram.accept_inbound", f"tg:update:{owner_update_id}")
+            )
+            asyncio.run(accept_inbound_telegram_job(owner_link_job))
+            owner_link_status = client.get("/telegram/owner-link", headers=auth)
+            assert owner_link_status.status_code == 200
+            assert owner_link_status.json()["linked"] is True
+
             def send_customer_message(text: str, sequence: int) -> str:
                 update_id = 800000 + sequence
                 message_payload = {
@@ -219,9 +253,36 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         select(Customer).where(Customer.tenant_id == tenant_id)
                     )
                     customers = list(customer_result.scalars().all())
-                    return appointments, outbound, history, customers
+                    notifications_result = await session.execute(
+                        select(TelegramOwnerNotification).where(
+                            TelegramOwnerNotification.tenant_id == tenant_id
+                        )
+                    )
+                    notifications = list(notifications_result.scalars().all())
+                    alert_jobs_result = await session.execute(
+                        select(BackgroundJob).where(
+                            BackgroundJob.tenant_id == tenant_id,
+                            BackgroundJob.job_type == "telegram.owner_appointment_alert",
+                        )
+                    )
+                    alert_jobs = list(alert_jobs_result.scalars().all())
+                    return (
+                        appointments,
+                        outbound,
+                        history,
+                        customers,
+                        notifications,
+                        alert_jobs,
+                    )
 
-            appointments, outbound, history, customers = asyncio.run(inspect_results())
+            (
+                appointments,
+                outbound,
+                history,
+                customers,
+                notifications,
+                alert_jobs,
+            ) = asyncio.run(inspect_results())
             assert len(appointments) == 1
             appointment = appointments[0]
             assert appointment.status == "confirmed"
@@ -229,6 +290,9 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             assert len(history) == 7
             assert len(customers) == 1
             assert customers[0].phone_e164 == expected_phone
+            assert len(notifications) == 1
+            assert notifications[0].status == "queued"
+            assert len(alert_jobs) == 1
             assert any(
                 "appointment is confirmed"
                 in decrypt_telegram_secret(item.body_encrypted).casefold()

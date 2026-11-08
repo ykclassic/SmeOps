@@ -27,6 +27,7 @@ from app.schemas.business import (
     ServiceCreate,
     ServiceResponse,
 )
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
 router = APIRouter(tags=["business operations"])
 ManagerOrOwner = Annotated[User, Depends(require_roles("owner", "manager"))]
@@ -315,6 +316,13 @@ async def create_appointment(
             },
         )
     )
+    await session.flush()
+    await enqueue_appointment_owner_alerts(
+        session,
+        tenant_id=tenant.id,
+        appointment_id=appointment.id,
+    )
+
     try:
         await session.commit()
     except IntegrityError as exc:

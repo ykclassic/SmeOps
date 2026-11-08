@@ -9,6 +9,7 @@ from app.models.telegram import (
     TelegramOutboundMessage,
     TelegramWebhookEvent,
 )
+from app.models.telegram_owner import TelegramOwnerLink, TelegramOwnerNotification
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.whatsapp import WhatsAppConnection, WhatsAppWebhookEvent
@@ -32,6 +33,8 @@ __all__ = [
     "Service",
     "Tenant",
     "TelegramConnection",
+    "TelegramOwnerLink",
+    "TelegramOwnerNotification",
     "TelegramConversation",
     "TelegramConversationMessage",
     "TelegramOutboundMessage",

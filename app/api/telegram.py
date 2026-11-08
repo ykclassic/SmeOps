@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import uuid4
 
@@ -24,7 +26,13 @@ from app.integrations.telegram_bot import (
     register_webhook,
 )
 from app.jobs.queue import enqueue_job
-from app.models import AuditEvent, TelegramConnection, TelegramWebhookEvent, User
+from app.models import (
+    AuditEvent,
+    TelegramConnection,
+    TelegramOwnerLink,
+    TelegramWebhookEvent,
+    User,
+)
 from app.schemas.telegram import (
     TelegramConnectionProvision,
     TelegramConnectionResponse,
@@ -382,3 +390,109 @@ async def queue_telegram_text_message(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return TelegramOutboundMessageResponse(id=message.id, status=message.status)
+
+
+
+@router.post("/telegram/owner-link")
+async def create_telegram_owner_link(
+    session: DbSession,
+    user: OwnerOnly,
+) -> dict[str, str | bool]:
+    connection_result = await session.execute(
+        select(TelegramConnection).where(
+            TelegramConnection.tenant_id == user.tenant_id,
+            TelegramConnection.status == "active",
+        )
+    )
+    connection = connection_result.scalar_one_or_none()
+    if connection is None or not connection.bot_username:
+        raise HTTPException(status_code=409, detail="An active Telegram bot is required")
+
+    result = await session.execute(
+        select(TelegramOwnerLink)
+        .where(
+            TelegramOwnerLink.tenant_id == user.tenant_id,
+            TelegramOwnerLink.owner_user_id == user.id,
+        )
+        .with_for_update()
+    )
+    link = result.scalar_one_or_none()
+    if (
+        link is not None
+        and link.linked_at is not None
+        and link.disabled_at is None
+        and link.chat_id is not None
+    ):
+        return {"linked": True, "status": "active"}
+
+    token = secrets.token_urlsafe(24)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    expires_at = datetime.now(UTC) + timedelta(minutes=15)
+    if link is None:
+        link = TelegramOwnerLink(
+            tenant_id=user.tenant_id,
+            owner_user_id=user.id,
+            invitation_hash=token_hash,
+            expires_at=expires_at,
+        )
+    else:
+        link.invitation_hash = token_hash
+        link.expires_at = expires_at
+        link.chat_id = None
+        link.linked_at = None
+        link.disabled_at = None
+    session.add(link)
+    await session.commit()
+    return {
+        "linked": False,
+        "status": "pending",
+        "expires_at": expires_at.isoformat(),
+        "deep_link": f"https://t.me/{connection.bot_username}?start={token}",
+    }
+
+
+@router.get("/telegram/owner-link")
+async def get_telegram_owner_link_status(
+    session: DbSession,
+    user: OwnerOnly,
+) -> dict[str, str | bool | None]:
+    result = await session.execute(
+        select(TelegramOwnerLink).where(
+            TelegramOwnerLink.tenant_id == user.tenant_id,
+            TelegramOwnerLink.owner_user_id == user.id,
+        )
+    )
+    link = result.scalar_one_or_none()
+    linked = bool(
+        link is not None
+        and link.linked_at is not None
+        and link.disabled_at is None
+        and link.chat_id is not None
+    )
+    return {
+        "linked": linked,
+        "status": "active" if linked else "disconnected",
+        "linked_at": link.linked_at.isoformat() if linked and link else None,
+    }
+
+
+@router.delete("/telegram/owner-link")
+async def disconnect_telegram_owner_link(
+    session: DbSession,
+    user: OwnerOnly,
+) -> dict[str, str]:
+    result = await session.execute(
+        select(TelegramOwnerLink)
+        .where(
+            TelegramOwnerLink.tenant_id == user.tenant_id,
+            TelegramOwnerLink.owner_user_id == user.id,
+        )
+        .with_for_update()
+    )
+    link = result.scalar_one_or_none()
+    if link is not None:
+        link.disabled_at = datetime.now(UTC)
+        link.invitation_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+        link.expires_at = datetime.now(UTC)
+        await session.commit()
+    return {"status": "disconnected"}

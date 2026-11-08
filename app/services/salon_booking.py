@@ -17,6 +17,7 @@ from app.models import (
     Tenant,
     User,
 )
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
 SLOT_INTERVAL_MINUTES = 30
 BOOKING_NAMESPACE = UUID("a2a42f47-2ed0-47e6-86cb-1c4ef4b2d129")
@@ -253,6 +254,11 @@ async def create_appointment_booking(
         )
     )
     await session.flush()
+    await enqueue_appointment_owner_alerts(
+        session,
+        tenant_id=tenant_id,
+        appointment_id=appointment.id,
+    )
     return appointment
 
 

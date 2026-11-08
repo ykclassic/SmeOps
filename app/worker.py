@@ -9,6 +9,7 @@ from sqlalchemy import text
 from app.db.session import engine
 from app.jobs.telegram import accept_inbound_telegram_job
 from app.jobs.telegram_outbound import send_outbound_telegram_job
+from app.jobs.telegram_owner_notifications import send_owner_appointment_alert_job
 from app.jobs.whatsapp import accept_inbound_whatsapp_job
 from app.jobs.whatsapp_onboarding import complete_whatsapp_onboarding_job
 from app.jobs.whatsapp_outbound import send_outbound_whatsapp_job
@@ -30,6 +31,7 @@ HANDLERS = {
     "telegram.accept_inbound": accept_inbound_telegram_job,
     "telegram.process_conversation": process_telegram_conversation_job,
     "telegram.send_text": send_outbound_telegram_job,
+    "telegram.owner_appointment_alert": send_owner_appointment_alert_job,
     "whatsapp.complete_signup": complete_whatsapp_onboarding_job,
     "whatsapp.process_conversation": process_whatsapp_conversation_job,
     "whatsapp.send_text": send_outbound_whatsapp_job,
