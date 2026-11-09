@@ -26,13 +26,15 @@ async def enqueue_customer_appointment_notification(
             TelegramPlatformBot.status == "active",
         )
     )
-    if platform_result.scalar_one_or_none() is None:
+    platform_bot = platform_result.scalar_one_or_none()
+    if platform_bot is None:
         return False
 
     identity_result = await session.execute(
         select(TelegramCustomerIdentity).where(
             TelegramCustomerIdentity.tenant_id == tenant_id,
             TelegramCustomerIdentity.customer_id == customer_id,
+            TelegramCustomerIdentity.platform_bot_id == platform_bot.id,
             TelegramCustomerIdentity.revoked_at.is_(None),
         )
     )
