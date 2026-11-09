@@ -149,7 +149,7 @@ async def test_appointment_alert_is_queued_once_per_linked_owner(monkeypatch):
     assert jobs[0]["job_type"] == "telegram.owner_appointment_alert"
     assert jobs[0]["tenant_id"] == tenant_id
     assert jobs[0]["idempotency_key"] == (
-        f"tg:owner-alert:{appointment_id}:{owner_id}"
+        f"tg:owner-alert:appointment.created:{appointment_id}:{owner_id}"
     )
 
 
@@ -218,6 +218,7 @@ async def test_owner_notification_worker_sends_reference_and_local_booking_detai
         tenant_id=tenant_id,
         owner_user_id=owner_id,
         appointment_id=appointment_id,
+        event_type="appointment.created",
         status="queued",
         provider_message_id=None,
         last_error_code=None,
