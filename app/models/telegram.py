@@ -251,3 +251,50 @@ class TelegramChatContext(UUIDPrimaryKey, TimestampMixin, Base):
     selected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+
+class TelegramCustomerIdentity(UUIDPrimaryKey, TimestampMixin, Base):
+    """A customer identity verified through Telegram's self-shared contact action."""
+
+    __tablename__ = "telegram_customer_identities"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "customer_id"],
+            ["customers.tenant_id", "customers.id"],
+            name="fk_telegram_customer_identities_tenant_customer",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id", "telegram_user_id",
+            name="uq_telegram_customer_identity_tenant_user",
+        ),
+        UniqueConstraint(
+            "tenant_id", "customer_id",
+            name="uq_telegram_customer_identity_tenant_customer",
+        ),
+        UniqueConstraint(
+            "tenant_id", "telegram_chat_id",
+            name="uq_telegram_customer_identity_tenant_chat",
+        ),
+        Index(
+            "ix_telegram_customer_identity_active",
+            "tenant_id", "telegram_user_id", "revoked_at",
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    customer_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    platform_bot_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("telegram_platform_bots.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    telegram_user_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    telegram_chat_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
