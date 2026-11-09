@@ -54,11 +54,16 @@ async def enqueue_customer_appointment_notification(
     if conversation is None:
         return False
 
-    await enqueue_telegram_text(
-        session,
-        tenant_id=tenant_id,
-        conversation_id=conversation.id,
-        body=body,
-        idempotency_key=idempotency_key,
-    )
+    try:
+        await enqueue_telegram_text(
+            session,
+            tenant_id=tenant_id,
+            conversation_id=conversation.id,
+            body=body,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError:
+        # The appointment lifecycle remains authoritative. An unavailable or
+        # conflicting recipient/message is recorded by the caller as skipped.
+        return False
     return True
