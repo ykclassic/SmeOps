@@ -331,7 +331,24 @@ async def process_channel_conversation_job(
                     conversation=conversation,
                     contact=telegram_contact,
                 )
-                if verified_customer is None:
+                if verified_customer is None and booking.get("step") == "awaiting_phone":
+                    # A self-shared contact can supply the phone for a first booking,
+                    # but it does not create a verified customer identity until a
+                    # matching tenant customer record exists.
+                    booking_phone = _normalize_contact_phone(
+                        str(telegram_contact.get("phone_number", ""))
+                    )
+                    if booking_phone is None:
+                        reply = "That contact did not contain a valid phone number. Please share your contact again."
+                    else:
+                        customer_phone = booking_phone
+                        booking["customer_phone"] = booking_phone
+                        booking["step"] = "awaiting_date"
+                        reply = (
+                            "Thanks. Your phone number has been added to this booking. "
+                            "What day would you like to visit?"
+                        )
+                elif verified_customer is None:
                     reply = (
                         "I couldn't verify that contact against a customer record for this business. "
                         "Please ask the business to create your customer record or appointment first, "
