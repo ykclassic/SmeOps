@@ -395,3 +395,46 @@ async def test_shared_platform_bot_delivers_each_tenant_alert_to_its_own_owner(m
             "Reference: " + str(appointment_id).replace("-", "")[:8].upper()
         ) in body
         assert notification.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_repeated_reschedules_queue_distinct_owner_events(monkeypatch):
+    tenant_id = uuid4()
+    owner_id = uuid4()
+    appointment_id = uuid4()
+    link = SimpleNamespace(
+        tenant_id=tenant_id,
+        owner_user_id=owner_id,
+        chat_id="998877",
+        linked_at=datetime.now(UTC),
+        disabled_at=None,
+    )
+    session = Session([[link], None, [link], None])
+    jobs = []
+
+    async def enqueue(_session, **kwargs):
+        jobs.append(kwargs)
+
+    monkeypatch.setattr(telegram_owner_notifications, "enqueue_job", enqueue)
+
+    first_event = uuid4()
+    second_event = uuid4()
+    first_count = await telegram_owner_notifications.enqueue_appointment_owner_alerts(
+        session,
+        tenant_id=tenant_id,
+        appointment_id=appointment_id,
+        event_type="appointment.rescheduled",
+        event_key=f"appointment.rescheduled:{first_event}",
+    )
+    second_count = await telegram_owner_notifications.enqueue_appointment_owner_alerts(
+        session,
+        tenant_id=tenant_id,
+        appointment_id=appointment_id,
+        event_type="appointment.rescheduled",
+        event_key=f"appointment.rescheduled:{second_event}",
+    )
+
+    assert first_count == second_count == 1
+    assert len(session.records) == 2
+    assert len(jobs) == 2
+    assert jobs[0]["idempotency_key"] != jobs[1]["idempotency_key"]
