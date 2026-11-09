@@ -157,7 +157,11 @@ async def test_verified_identity_is_bound_to_tenant_customer_and_sender(monkeypa
     from app.services import conversation_engine
     from app.services.conversation_engine import _verify_telegram_customer_contact
 
-    monkeypatch.setattr(conversation_engine, "encrypt_telegram_secret", lambda value: f"cipher:{value}")
+    monkeypatch.setattr(
+        conversation_engine,
+        "encrypt_telegram_secret",
+        lambda value: f"cipher:{value}",
+    )
     tenant_id = uuid4()
     customer = SimpleNamespace(id=uuid4(), tenant_id=tenant_id, phone_e164="+2348012345678")
     platform_bot = SimpleNamespace(id=uuid4())
