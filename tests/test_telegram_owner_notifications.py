@@ -312,6 +312,7 @@ async def test_shared_platform_bot_delivers_each_tenant_alert_to_its_own_owner(m
             tenant_id=tenant_id,
             owner_user_id=owner_id,
             appointment_id=appointment_id,
+            event_type="appointment.created",
             status="queued",
             provider_message_id=None,
             last_error_code=None,
