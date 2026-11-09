@@ -36,7 +36,7 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["tenant_id"], ["tenants.id"],
-            name="fk_telegram_customer_identities_tenant",
+            name="fk_telegram_customer_identities_tenant_id_tenants",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
@@ -47,7 +47,7 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["platform_bot_id"], ["telegram_platform_bots.id"],
-            name="fk_telegram_customer_identities_platform_bot",
+            name="fk_telegram_customer_identities_platform_bot_id_telegram_platform_bots",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_telegram_customer_identities"),
