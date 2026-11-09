@@ -481,8 +481,8 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                     ZoneInfo("Africa/Lagos")
                 ).date() == new_day
                 assert "appointment.created" in lifecycle_events
-                assert "appointment.rescheduled" in lifecycle_events
-                assert "appointment.cancelled" in lifecycle_events
+                assert "appointment.rescheduled.customer" in lifecycle_events
+                assert "appointment.cancelled.customer" in lifecycle_events
 
     finally:
         if tenant_id is not None:
