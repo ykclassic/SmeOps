@@ -55,15 +55,16 @@ async def enqueue_customer_appointment_notification(
         return False
 
     try:
-        await enqueue_telegram_text(
-            session,
-            tenant_id=tenant_id,
-            conversation_id=conversation.id,
-            body=body,
-            idempotency_key=idempotency_key,
-        )
+        async with session.begin_nested():
+            await enqueue_telegram_text(
+                session,
+                tenant_id=tenant_id,
+                conversation_id=conversation.id,
+                body=body,
+                idempotency_key=idempotency_key,
+            )
     except ValueError:
-        # The appointment lifecycle remains authoritative. An unavailable or
-        # conflicting recipient/message is recorded by the caller as skipped.
+        # Roll back only the outbox savepoint. The appointment mutation and
+        # lifecycle audit remain eligible to commit in the outer transaction.
         return False
     return True
