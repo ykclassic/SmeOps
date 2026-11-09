@@ -354,11 +354,11 @@ async def process_channel_conversation_job(
                         )
             elif channel == "telegram" and normalized in {"/help", "help"}:
                 reply = (
-                    "SmeOps appointment menu:\\n"
-                    "/book — make an appointment\\n"
-                    "/appointments — view your upcoming appointments\\n"
-                    "/cancel — cancel an appointment\\n"
-                    "/reschedule — change an appointment date or time\\n"
+                    "SmeOps appointment menu:\n"
+                    "/book — make an appointment\n"
+                    "/appointments — view your upcoming appointments\n"
+                    "/cancel — cancel an appointment\n"
+                    "/reschedule — change an appointment date or time\n"
                     "/help — show this menu"
                 )
             elif channel == "telegram" and normalized in {"/appointments", "my appointments"}:
