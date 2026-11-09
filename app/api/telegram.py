@@ -435,6 +435,7 @@ async def queue_telegram_text_message(
         ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
     return TelegramOutboundMessageResponse(id=message.id, status=message.status)
 
 
