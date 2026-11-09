@@ -592,8 +592,8 @@ async def process_channel_conversation_job(
                                 session,
                                 tenant_id=job.tenant_id,
                                 appointment_id=appointment.id,
-                                event_type="appointment.cancelled",
-                                event_key=f"appointment.cancelled:{event_id}",
+                                event_type="appointment.cancelled.customer",
+                                event_key=f"appointment.cancelled.customer:{event_id}",
                             )
                             reply = (
                                 "Your appointment has been cancelled. "
@@ -741,8 +741,8 @@ async def process_channel_conversation_job(
                                     session,
                                     tenant_id=job.tenant_id,
                                     appointment_id=appointment.id,
-                                    event_type="appointment.rescheduled",
-                                    event_key=f"appointment.rescheduled:{event_id}",
+                                    event_type="appointment.rescheduled.customer",
+                                    event_key=f"appointment.rescheduled.customer:{event_id}",
                                 )
                                 new_local = appointment.starts_at.astimezone(timezone)
                                 new_label = new_local.strftime("%A, %d %B %Y at %I:%M %p")
