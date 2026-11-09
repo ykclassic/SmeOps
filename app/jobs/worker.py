@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import traceback
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
@@ -38,8 +39,14 @@ async def run_once(
         try:
             await handler(job)
         except Exception as exc:
+            # Log traceback frames and exception class, but not the exception
+            # message: provider/DB exceptions can embed request data or secrets.
+            safe_traceback = "".join(traceback.format_tb(exc.__traceback__))
             logger.error(
-                "Background job handler raised an exception",
+                "Background job handler raised an exception "
+                "(error_type=%s)\n%s",
+                type(exc).__name__,
+                safe_traceback,
                 extra={
                     "job_id": str(job.id),
                     "job_type": job.job_type,
