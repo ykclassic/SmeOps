@@ -352,6 +352,15 @@ async def process_channel_conversation_job(
                             "Send /appointments to view your upcoming appointments, "
                             "/cancel to cancel one, or /reschedule to change its time."
                         )
+            elif channel == "telegram" and normalized in {"/help", "help"}:
+                reply = (
+                    "SmeOps appointment menu:\\n"
+                    "/book — make an appointment\\n"
+                    "/appointments — view your upcoming appointments\\n"
+                    "/cancel — cancel an appointment\\n"
+                    "/reschedule — change an appointment date or time\\n"
+                    "/help — show this menu"
+                )
             elif channel == "telegram" and normalized in {"/appointments", "my appointments"}:
                 identity_result = await session.execute(
                     select(TelegramCustomerIdentity).where(
@@ -363,7 +372,10 @@ async def process_channel_conversation_job(
                 )
                 identity = identity_result.scalar_one_or_none()
                 if identity is None:
-                    reply = "To view your appointments, share your own Telegram contact first."
+                    reply = (
+                        "To view your appointments, share your own Telegram contact first. "
+                        "Tap the attachment icon in Telegram, choose Contact, then select Share My Contact."
+                    )
                 else:
                     appointments_result = await session.execute(
                         select(Appointment, Service).join(
@@ -390,7 +402,7 @@ async def process_channel_conversation_job(
                                 f"(Ref: {reference})"
                             )
                         lines.append("Send /cancel or /reschedule to manage an appointment.")
-                        reply = "\\n".join(lines)
+                        reply = "\n".join(lines)
 
             elif channel == "telegram" and normalized in {"/cancel", "/reschedule"}:
                 identity_result = await session.execute(
@@ -403,7 +415,10 @@ async def process_channel_conversation_job(
                 )
                 identity = identity_result.scalar_one_or_none()
                 if identity is None:
-                    reply = "Share your own Telegram contact first to manage appointments."
+                    reply = (
+                        "Share your own Telegram contact first to manage appointments. "
+                        "In Telegram, tap the attachment icon, choose Contact, then select Share My Contact."
+                    )
                 else:
                     rows_result = await session.execute(
                         select(Appointment, Service).join(
@@ -427,6 +442,7 @@ async def process_channel_conversation_job(
                             "step": "choose",
                             "appointment_ids": [str(row[0].id) for row in rows],
                             "customer_id": str(identity.customer_id),
+                            "expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
                         }
                         lines = [f"Choose an appointment to {action} by replying with its number:"]
                         for index, (appointment, service) in enumerate(rows, start=1):
@@ -437,13 +453,22 @@ async def process_channel_conversation_job(
                                 f"{local_start.strftime('%a, %d %b %Y %I:%M %p')} "
                                 f"(Ref: {reference})"
                             )
-                        reply = "\\n".join(lines)
+                        reply = "\n".join(lines)
             elif channel == "telegram" and isinstance(context.get("appointment_management"), dict):
                 management = dict(context["appointment_management"])
                 management_step = management.get("step")
                 action = management.get("action")
                 customer_id = management.get("customer_id")
-                if action not in {"cancel", "reschedule"} or not customer_id:
+                try:
+                    expires_at = datetime.fromisoformat(management.get("expires_at", ""))
+                except (TypeError, ValueError):
+                    expires_at = None
+                if (
+                    action not in {"cancel", "reschedule"}
+                    or not customer_id
+                    or expires_at is None
+                    or expires_at <= datetime.now(UTC)
+                ):
                     context.pop("appointment_management", None)
                     reply = "That appointment-management session expired. Send /appointments to start again."
                 elif management_step == "choose":
@@ -572,7 +597,7 @@ async def process_channel_conversation_job(
                                     for index, slot in enumerate(slots, start=1)
                                 )
                                 lines.append("Reply with the number of your preferred time.")
-                                reply = "\\n".join(lines)
+                                reply = "\n".join(lines)
                 elif management_step == "choose_slot":
                     slots = management.get("available_slots", [])
                     if not normalized.isdigit() or not 1 <= int(normalized) <= len(slots):
