@@ -71,7 +71,12 @@ class TelegramOwnerNotification(UUIDPrimaryKey, TimestampMixin, Base):
     appointment_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("appointments.id", ondelete="CASCADE"), nullable=False
     )
-    event_type: Mapped[str] = mapped_column(String(80), nullable=False, default="appointment.created", server_default=text("'appointment.created'"))
+    event_type: Mapped[str] = mapped_column(
+        String(80),
+        nullable=False,
+        default="appointment.created",
+        server_default=text("'appointment.created'"),
+    )
     status: Mapped[Literal["queued", "sending", "sent", "failed", "unknown"]] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")
     )
