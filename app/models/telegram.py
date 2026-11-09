@@ -286,12 +286,12 @@ class TelegramCustomerIdentity(UUIDPrimaryKey, TimestampMixin, Base):
     )
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("tenants.id", name="fk_tg_customer_identity_tenant", ondelete="CASCADE"), nullable=False
     )
     customer_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     platform_bot_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("telegram_platform_bots.id", ondelete="CASCADE"),
+        ForeignKey("telegram_platform_bots.id", name="fk_tg_customer_identity_platform_bot", ondelete="CASCADE"),
         nullable=False,
     )
     telegram_user_id: Mapped[str] = mapped_column(String(80), nullable=False)
