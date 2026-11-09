@@ -62,7 +62,13 @@ async def _persist_telegram_message(
         and contact.get("user_id") == user_id
         and isinstance(contact.get("phone_number"), str)
     ):
-        text_body = "contact:" + contact["phone_number"]
+        # Store a typed envelope so a customer cannot spoof a shared contact by
+        # typing a string that resembles the old "contact:<phone>" marker.
+        text_body = json.dumps({
+            "type": "telegram_self_contact",
+            "user_id": str(user_id),
+            "phone_number": contact["phone_number"],
+        }, separators=(",", ":"))
     if isinstance(text_body, str) and len(text_body) > 4096:
         text_body = None
     if not isinstance(text_body, str):
