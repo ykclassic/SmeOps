@@ -218,7 +218,7 @@ async def _queue_customer_lifecycle_message(
         session,
         tenant_id=tenant.id,
         customer_id=customer.id,
-        body="\\n".join(lines),
+        body="\n".join(lines),
         idempotency_key=f"customer-lifecycle:{appointment.id}:{event_type}",
     )
     if not queued:
