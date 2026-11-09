@@ -530,6 +530,9 @@ async def process_channel_conversation_job(
                         context.pop("appointment_management", None)
                         reply = "Cancellation stopped. Your appointment remains confirmed."
                     elif normalized in YES_WORDS:
+                        await session.execute(
+                            select(Tenant).where(Tenant.id == job.tenant_id).with_for_update()
+                        )
                         result = await session.execute(
                             select(Appointment, Service).join(
                                 Service,
@@ -540,6 +543,7 @@ async def process_channel_conversation_job(
                                 Appointment.tenant_id == job.tenant_id,
                                 Appointment.customer_id == UUID(customer_id),
                                 Appointment.status == "confirmed",
+                                Appointment.starts_at >= datetime.now(UTC),
                             ).with_for_update(of=Appointment)
                         )
                         row = result.one_or_none()
@@ -633,6 +637,9 @@ async def process_channel_conversation_job(
                         context.pop("appointment_management", None)
                         reply = "Rescheduling stopped. Your original appointment remains unchanged."
                     elif normalized in YES_WORDS:
+                        await session.execute(
+                            select(Tenant).where(Tenant.id == job.tenant_id).with_for_update()
+                        )
                         result = await session.execute(
                             select(Appointment, Service).join(
                                 Service,
@@ -643,6 +650,7 @@ async def process_channel_conversation_job(
                                 Appointment.tenant_id == job.tenant_id,
                                 Appointment.customer_id == UUID(customer_id),
                                 Appointment.status == "confirmed",
+                                Appointment.starts_at >= datetime.now(UTC),
                             ).with_for_update(of=Appointment)
                         )
                         row = result.one_or_none()
