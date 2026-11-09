@@ -189,6 +189,7 @@ async def _queue_customer_lifecycle_message(
     customer: Customer,
     service: Service,
     event_type: str,
+    event_id: UUID,
     previous_starts_at: datetime | None = None,
 ) -> None:
     timezone = ZoneInfo(tenant.business_timezone)
@@ -219,7 +220,7 @@ async def _queue_customer_lifecycle_message(
         tenant_id=tenant.id,
         customer_id=customer.id,
         body="\n".join(lines),
-        idempotency_key=f"customer-lifecycle:{appointment.id}:{event_type}",
+        idempotency_key=f"customer-lifecycle:{event_id}",
     )
     if not queued:
         # No phone/chat is inferred. The business action remains valid; this
@@ -438,6 +439,7 @@ async def cancel_appointment(
         raise HTTPException(status_code=409, detail="Appointment is not cancellable")
 
     now = datetime.now(UTC)
+    event_id = uuid4()
     appointment.status = "cancelled"
     appointment.cancelled_at = now
     service_result = await session.execute(
@@ -448,6 +450,7 @@ async def cancel_appointment(
         raise HTTPException(status_code=409, detail="Appointment service is unavailable")
     session.add(
         AuditEvent(
+            id=event_id,
             tenant_id=tenant.id,
             actor_user_id=user.id,
             event_type="appointment.cancelled",
@@ -459,10 +462,12 @@ async def cancel_appointment(
     await _queue_customer_lifecycle_message(
         session, tenant=tenant, appointment=appointment, customer=customer,
         service=service, event_type="appointment.cancelled",
+        event_id=event_id,
     )
     await enqueue_appointment_owner_alerts(
         session, tenant_id=tenant.id, appointment_id=appointment.id,
         event_type="appointment.cancelled",
+        event_key=f"appointment.cancelled:{event_id}",
     )
     await session.commit()
     return _appointment_response(appointment, customer)
@@ -636,10 +641,12 @@ async def reschedule_appointment(
 
     old_start, old_end = appointment.starts_at, appointment.ends_at
     now = datetime.now(UTC)
+    event_id = uuid4()
     appointment.starts_at = new_start
     appointment.ends_at = new_end
     appointment.rescheduled_at = now
     session.add(AuditEvent(
+        id=event_id,
         tenant_id=tenant.id,
         actor_user_id=user.id,
         event_type="appointment.rescheduled",
@@ -657,10 +664,12 @@ async def reschedule_appointment(
         session, tenant=tenant, appointment=appointment, customer=customer,
         service=service, event_type="appointment.rescheduled",
         previous_starts_at=old_start,
+        event_id=event_id,
     )
     await enqueue_appointment_owner_alerts(
         session, tenant_id=tenant.id, appointment_id=appointment.id,
         event_type="appointment.rescheduled",
+        event_key=f"appointment.rescheduled:{event_id}",
     )
     await session.commit()
     return _appointment_response(appointment, customer)
