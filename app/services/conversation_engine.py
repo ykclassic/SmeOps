@@ -381,6 +381,7 @@ async def process_channel_conversation_job(
                     "/help — show this menu"
                 )
             elif channel == "telegram" and normalized in {"/appointments", "my appointments"}:
+                context.pop("appointment_management", None)
                 identity_result = await session.execute(
                     select(TelegramCustomerIdentity).where(
                         TelegramCustomerIdentity.tenant_id == job.tenant_id,
@@ -424,6 +425,7 @@ async def process_channel_conversation_job(
                         reply = "\n".join(lines)
 
             elif channel == "telegram" and normalized in {"/cancel", "/reschedule"}:
+                context.pop("appointment_management", None)
                 identity_result = await session.execute(
                     select(TelegramCustomerIdentity).where(
                         TelegramCustomerIdentity.tenant_id == job.tenant_id,
@@ -890,7 +892,11 @@ async def process_channel_conversation_job(
                                 )
                             )
                             platform_bot = bot_result.scalar_one_or_none()
-                            if booked_customer is not None and platform_bot is not None:
+                            if (
+                                booked_customer is not None
+                                and platform_bot is not None
+                                and booked_customer.phone_e164 == booking.get("customer_phone")
+                            ):
                                 identity_result = await session.execute(
                                     select(TelegramCustomerIdentity).where(
                                         TelegramCustomerIdentity.tenant_id == job.tenant_id,
