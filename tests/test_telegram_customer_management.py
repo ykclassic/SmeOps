@@ -245,3 +245,78 @@ async def test_unknown_tenant_customer_is_not_bound_as_verified_identity():
 
     assert result is None
     assert session.records == []
+
+
+
+@pytest.mark.asyncio
+async def test_customer_notification_uses_verified_tenant_identity_without_committing(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import telegram_customer_notifications as notifications
+
+    tenant_id = uuid4()
+    customer_id = uuid4()
+    bot = SimpleNamespace(id=uuid4())
+    identity = SimpleNamespace(
+        tenant_id=tenant_id,
+        customer_id=customer_id,
+        telegram_user_id="123456",
+        telegram_chat_id="123456",
+    )
+    conversation = SimpleNamespace(id=uuid4(), tenant_id=tenant_id)
+    session = FakeSession()
+    session.values = [bot, identity, conversation]
+    statements = []
+
+    async def execute(statement):
+        statements.append(statement)
+        return FakeResult(session.values.pop(0))
+
+    session.execute = execute
+    queued = []
+
+    async def fake_enqueue(_session, **kwargs):
+        queued.append(kwargs)
+
+    monkeypatch.setattr(notifications, "enqueue_telegram_text", fake_enqueue)
+
+    result = await notifications.enqueue_customer_appointment_notification(
+        session,
+        tenant_id=tenant_id,
+        customer_id=customer_id,
+        body="Your appointment has changed.",
+        idempotency_key="customer-lifecycle-test",
+    )
+
+    assert result is True
+    assert len(queued) == 1
+    assert queued[0]["conversation_id"] == conversation.id
+    assert queued[0]["tenant_id"] == tenant_id
+    assert not hasattr(session, "committed")
+    assert "telegram_customer_identities.tenant_id" in str(statements[1])
+    assert "telegram_conversations.tenant_id" in str(statements[2])
+
+
+@pytest.mark.asyncio
+async def test_customer_notification_skips_when_identity_is_unverified():
+    from types import SimpleNamespace
+
+    from app.services.telegram_customer_notifications import (
+        enqueue_customer_appointment_notification,
+    )
+
+    session = FakeSession()
+    session.values = [SimpleNamespace(id=uuid4()), None]
+
+    async def execute(_statement):
+        return FakeResult(session.values.pop(0))
+
+    session.execute = execute
+    result = await enqueue_customer_appointment_notification(
+        session,
+        tenant_id=uuid4(),
+        customer_id=uuid4(),
+        body="Do not send.",
+        idempotency_key="unverified-customer",
+    )
+    assert result is False
