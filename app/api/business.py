@@ -466,8 +466,8 @@ async def cancel_appointment(
     )
     await enqueue_appointment_owner_alerts(
         session, tenant_id=tenant.id, appointment_id=appointment.id,
-        event_type="appointment.cancelled",
-        event_key=f"appointment.cancelled:{event_id}",
+        event_type="appointment.cancelled.business",
+        event_key=f"appointment.cancelled.business:{event_id}",
     )
     await session.commit()
     return _appointment_response(appointment, customer)
@@ -668,8 +668,8 @@ async def reschedule_appointment(
     )
     await enqueue_appointment_owner_alerts(
         session, tenant_id=tenant.id, appointment_id=appointment.id,
-        event_type="appointment.rescheduled",
-        event_key=f"appointment.rescheduled:{event_id}",
+        event_type="appointment.rescheduled.business",
+        event_key=f"appointment.rescheduled.business:{event_id}",
     )
     await session.commit()
     return _appointment_response(appointment, customer)
