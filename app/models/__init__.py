@@ -5,10 +5,10 @@ from app.models.retail import Order, OrderItem, Product
 from app.models.telegram import (
     TelegramBookingReference,
     TelegramChatContext,
-    TelegramCustomerIdentity,
     TelegramConnection,
     TelegramConversation,
     TelegramConversationMessage,
+    TelegramCustomerIdentity,
     TelegramOutboundMessage,
     TelegramPlatformBot,
     TelegramWebhookEvent,
