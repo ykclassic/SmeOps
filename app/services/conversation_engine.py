@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -237,7 +236,10 @@ async def process_channel_conversation_job(
             )
         )
         inbound = message_result.scalar_one_or_none()
-        if inbound is None or inbound.body_encrypted is None:
+        if inbound is None or (
+            inbound.body_encrypted is None
+            and not getattr(inbound, "contact_phone_encrypted", None)
+        ):
             return
         if (
             (channel == "whatsapp" and conversation.is_opted_out)
@@ -255,21 +257,21 @@ async def process_channel_conversation_job(
             if previous_at is not None and inbound.created_at <= previous_at:
                 return
 
-        body = decrypt_secret(inbound.body_encrypted).strip()
-        if not body:
-            return
+        body = (
+            decrypt_secret(inbound.body_encrypted).strip()
+            if inbound.body_encrypted else ""
+        )
         telegram_contact = None
-        if channel == "telegram":
-            try:
-                contact_envelope = json.loads(body)
-            except (TypeError, ValueError):
-                contact_envelope = None
-            if (
-                isinstance(contact_envelope, dict)
-                and contact_envelope.get("type") == "telegram_self_contact"
-            ):
-                telegram_contact = contact_envelope
-                body = "[Telegram contact shared]"
+        if channel == "telegram" and inbound.contact_phone_encrypted:
+            telegram_contact = {
+                "user_id": inbound.contact_user_id,
+                "phone_number": decrypt_telegram_secret(
+                    inbound.contact_phone_encrypted
+                ),
+            }
+            body = "[Telegram contact shared]"
+        if not body and telegram_contact is None:
+            return
         normalized = " ".join(body.casefold().split())
         tenant = await session.get(Tenant, job.tenant_id)
         if tenant is None:
