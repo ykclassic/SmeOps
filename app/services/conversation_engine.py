@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from datetime import UTC, datetime
@@ -15,9 +16,14 @@ from app.integrations.conversation_ai import (
 )
 from app.jobs.queue import ClaimedJob
 from app.models import (
+    Appointment,
+    AuditEvent,
+    Customer,
     Service,
     TelegramConversation,
     TelegramConversationMessage,
+    TelegramCustomerIdentity,
+    TelegramPlatformBot,
     Tenant,
     WhatsAppConversation,
     WhatsAppConversationMessage,
@@ -41,6 +47,77 @@ NO_WORDS = {"no", "n", "cancel", "no thanks"}
 HUMAN_WORDS = {"human", "agent", "staff", "talk to someone", "support"}
 START_WORDS = {"hi", "hello", "hey", "book", "booking", "appointment", "appointments"}
 PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
+
+
+def _normalize_contact_phone(value: str) -> str | None:
+    candidate = re.sub(r"[\\s().-]", "", value)
+    if candidate.startswith("0") and len(candidate) == 11:
+        candidate = "+234" + candidate[1:]
+    elif candidate.startswith("234") and len(candidate) == 13:
+        candidate = "+" + candidate
+    return candidate if PHONE_PATTERN.fullmatch(candidate) else None
+
+
+async def _verify_telegram_customer_contact(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    conversation: TelegramConversation,
+    contact: dict,
+) -> Customer | None:
+    sender_id = str(conversation.telegram_user_id)
+    if str(contact.get("user_id", "")) != sender_id:
+        return None
+    phone = _normalize_contact_phone(str(contact.get("phone_number", "")))
+    if phone is None:
+        return None
+
+    customer_result = await session.execute(
+        select(Customer).where(
+            Customer.tenant_id == tenant_id,
+            Customer.phone_e164 == phone,
+        )
+    )
+    customer = customer_result.scalar_one_or_none()
+    if customer is None:
+        return None
+
+    bot_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
+        )
+    )
+    platform_bot = bot_result.scalar_one_or_none()
+    if platform_bot is None:
+        return None
+
+    identity_result = await session.execute(
+        select(TelegramCustomerIdentity).where(
+            TelegramCustomerIdentity.tenant_id == tenant_id,
+            TelegramCustomerIdentity.telegram_user_id == sender_id,
+        ).with_for_update()
+    )
+    identity = identity_result.scalar_one_or_none()
+    if identity is not None:
+        if identity.customer_id != customer.id:
+            return None
+        identity.platform_bot_id = platform_bot.id
+        identity.telegram_chat_id = conversation.telegram_chat_id
+        identity.revoked_at = None
+        identity.verified_at = datetime.now(UTC)
+    else:
+        identity = TelegramCustomerIdentity(
+            tenant_id=tenant_id,
+            customer_id=customer.id,
+            platform_bot_id=platform_bot.id,
+            telegram_user_id=sender_id,
+            telegram_chat_id=conversation.telegram_chat_id,
+            verified_at=datetime.now(UTC),
+        )
+        session.add(identity)
+    conversation.customer_phone_encrypted = encrypt_telegram_secret(phone)
+    return customer
 
 
 def _format_price(price_minor: int) -> str:
@@ -179,6 +256,18 @@ async def process_channel_conversation_job(
         body = decrypt_secret(inbound.body_encrypted).strip()
         if not body:
             return
+        telegram_contact = None
+        if channel == "telegram":
+            try:
+                contact_envelope = json.loads(body)
+            except (TypeError, ValueError):
+                contact_envelope = None
+            if (
+                isinstance(contact_envelope, dict)
+                and contact_envelope.get("type") == "telegram_self_contact"
+            ):
+                telegram_contact = contact_envelope
+                body = "[Telegram contact shared]"
         normalized = " ".join(body.casefold().split())
         tenant = await session.get(Tenant, job.tenant_id)
         if tenant is None:
@@ -196,7 +285,7 @@ async def process_channel_conversation_job(
         reply: str
         booking = dict(context.get("booking") or {})
         ai_intent = None
-        if not booking.get("step") and normalized not in START_WORDS:
+        if not booking.get("step") and normalized not in START_WORDS and telegram_contact is None:
             try:
                 ai_intent = await classify_inbound_intent(body)
             except ConversationAIUnavailable as exc:
@@ -231,7 +320,74 @@ async def process_channel_conversation_job(
             booking = dict(context.get("booking") or {})
             step = booking.get("step")
 
-            if step == "awaiting_service":
+            if telegram_contact is not None and channel == "telegram":
+                verified_customer = await _verify_telegram_customer_contact(
+                    session,
+                    tenant_id=job.tenant_id,
+                    conversation=conversation,
+                    contact=telegram_contact,
+                )
+                if verified_customer is None:
+                    reply = (
+                        "I couldn't verify that contact against a customer record for this business. "
+                        "Please ask the business to create your customer record or appointment first, "
+                        "then share your own Telegram contact again."
+                    )
+                else:
+                    customer_phone = verified_customer.phone_e164
+                    if booking.get("step") == "awaiting_phone":
+                        booking["customer_phone"] = customer_phone
+                        booking["step"] = "awaiting_date"
+                        reply = (
+                            f"Your contact is verified, {verified_customer.name}. "
+                            "What day would you like to visit?"
+                        )
+                    else:
+                        reply = (
+                            f"Your contact is verified for {tenant.name}. "
+                            "Send /appointments to view your upcoming appointments, "
+                            "/cancel to cancel one, or /reschedule to change its time."
+                        )
+            elif channel == "telegram" and normalized in {"/appointments", "my appointments"}:
+                identity_result = await session.execute(
+                    select(TelegramCustomerIdentity).where(
+                        TelegramCustomerIdentity.tenant_id == job.tenant_id,
+                        TelegramCustomerIdentity.telegram_user_id == conversation.telegram_user_id,
+                        TelegramCustomerIdentity.telegram_chat_id == conversation.telegram_chat_id,
+                        TelegramCustomerIdentity.revoked_at.is_(None),
+                    )
+                )
+                identity = identity_result.scalar_one_or_none()
+                if identity is None:
+                    reply = "To view your appointments, share your own Telegram contact first."
+                else:
+                    appointments_result = await session.execute(
+                        select(Appointment, Service).join(
+                            Service,
+                            (Service.id == Appointment.service_id)
+                            & (Service.tenant_id == Appointment.tenant_id),
+                        ).where(
+                            Appointment.tenant_id == job.tenant_id,
+                            Appointment.customer_id == identity.customer_id,
+                            Appointment.status == "confirmed",
+                            Appointment.starts_at >= datetime.now(UTC),
+                        ).order_by(Appointment.starts_at).limit(10)
+                    )
+                    rows = appointments_result.all()
+                    if not rows:
+                        reply = "You have no upcoming confirmed appointments."
+                    else:
+                        lines = ["Your upcoming appointments:"]
+                        for index, (appointment, service) in enumerate(rows, start=1):
+                            local_start = appointment.starts_at.astimezone(timezone)
+                            reference = str(appointment.id).replace("-", "")[:8].upper()
+                            lines.append(
+                                f"{index}. {service.name} — {local_start.strftime('%a, %d %b %Y %I:%M %p')} "
+                                f"(Ref: {reference})"
+                            )
+                        lines.append("Send /cancel or /reschedule to manage an appointment.")
+                        reply = "\\n".join(lines)
+            elif step == "awaiting_service":
                 services_result = await session.execute(
                     select(Service)
                     .where(Service.tenant_id == job.tenant_id, Service.is_active.is_(True))
@@ -457,6 +613,7 @@ async def process_channel_conversation_job(
                 inbound_message_id=inbound.id,
                 body=reply,
             )
+            await session.commit()
         except OutboundPolicyViolation:
             logger.warning(
                 "WhatsApp reply suppressed by messaging policy",
