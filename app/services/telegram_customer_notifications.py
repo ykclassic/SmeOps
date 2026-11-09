@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import TelegramConversation, TelegramCustomerIdentity
+from app.models import TelegramConversation, TelegramCustomerIdentity, TelegramPlatformBot
 from app.services.telegram_outbound import enqueue_telegram_text
 
 
@@ -20,6 +20,15 @@ async def enqueue_customer_appointment_notification(
     The caller owns the transaction so this queue row and its job commit atomically
     with the appointment mutation and audit event.
     """
+    platform_result = await session.execute(
+        select(TelegramPlatformBot).where(
+            TelegramPlatformBot.singleton_key == "platform",
+            TelegramPlatformBot.status == "active",
+        )
+    )
+    if platform_result.scalar_one_or_none() is None:
+        return False
+
     identity_result = await session.execute(
         select(TelegramCustomerIdentity).where(
             TelegramCustomerIdentity.tenant_id == tenant_id,
