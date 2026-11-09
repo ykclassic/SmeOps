@@ -544,6 +544,7 @@ async def process_channel_conversation_job(
                                 )
                             else:
                                 management["step"] = "await_date"
+                                management["old_starts_at"] = appointment.starts_at.isoformat()
                                 reply = (
                                     "What new date would you like? Send today, tomorrow, "
                                     "a weekday, or YYYY-MM-DD."
@@ -663,8 +664,12 @@ async def process_channel_conversation_job(
                         context["appointment_management"] = management
                         selected_local = selected.astimezone(timezone)
                         selected_label = selected_local.strftime("%A, %d %B %Y at %I:%M %p")
+                        old_start = datetime.fromisoformat(
+                            management["old_starts_at"]
+                        ).astimezone(timezone)
+                        old_label = old_start.strftime("%A, %d %B %Y at %I:%M %p")
                         reply = (
-                            f"Reschedule to {selected_label}? "
+                            f"Change from {old_label} to {selected_label}? "
                             "Reply YES to confirm or NO to stop."
                         )
                 elif management_step == "confirm_reschedule":
@@ -700,6 +705,9 @@ async def process_channel_conversation_job(
                             requested_day = datetime.fromisoformat(
                                 management["requested_date"]
                             ).date()
+                            original_start = datetime.fromisoformat(
+                                management["old_starts_at"]
+                            ).astimezone(UTC)
                             current_slots = await get_available_slots(
                                 session,
                                 tenant_id=job.tenant_id,
@@ -708,7 +716,14 @@ async def process_channel_conversation_job(
                                 limit=48,
                                 exclude_appointment_id=appointment.id,
                             )
-                            if new_start not in current_slots:
+                            if appointment.starts_at != original_start:
+                                reply = (
+                                    "This appointment changed after you selected it. "
+                                    "Send /reschedule to review the current time."
+                                )
+                            elif new_start == appointment.starts_at:
+                                reply = "That is already your current appointment time."
+                            elif new_start not in current_slots:
                                 reply = (
                                     "That time is no longer available. "
                                     "Send /reschedule to try again."
