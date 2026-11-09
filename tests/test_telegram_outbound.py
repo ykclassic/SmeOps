@@ -77,7 +77,7 @@ async def test_enqueue_telegram_text_creates_ledger_history_and_job(monkeypatch)
     assert result.status == "queued"
     assert result.recipient_chat_id == "-100123456789"
     assert result.body_encrypted == "encrypted:Your appointment is confirmed."
-    assert session.committed
+    assert not session.committed  # transaction is committed by the calling workflow
     assert len(session.records) == 3
     assert queued[0]["job_type"] == "telegram.send_text"
     assert queued[0]["tenant_id"] == tenant_id
