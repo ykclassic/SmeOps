@@ -12,6 +12,7 @@ async def enqueue_appointment_owner_alerts(
     *,
     tenant_id: UUID,
     appointment_id: UUID,
+    event_type: str = "appointment.created",
 ) -> int:
     """Queue one durable, tenant-scoped alert for each linked active owner."""
     links_result = await session.execute(
@@ -39,6 +40,7 @@ async def enqueue_appointment_owner_alerts(
                 TelegramOwnerNotification.tenant_id == tenant_id,
                 TelegramOwnerNotification.owner_user_id == link.owner_user_id,
                 TelegramOwnerNotification.appointment_id == appointment_id,
+                TelegramOwnerNotification.event_type == event_type,
             )
         )
         if existing_result.scalar_one_or_none() is not None:
@@ -48,6 +50,7 @@ async def enqueue_appointment_owner_alerts(
             tenant_id=tenant_id,
             owner_user_id=link.owner_user_id,
             appointment_id=appointment_id,
+            event_type=event_type,
             status="queued",
         )
         session.add(notification)
@@ -58,7 +61,7 @@ async def enqueue_appointment_owner_alerts(
             job_type="telegram.owner_appointment_alert",
             payload={"notification_id": str(notification.id)},
             idempotency_key=(
-                f"tg:owner-alert:{appointment_id}:{link.owner_user_id}"
+                f"tg:owner-alert:{event_type}:{appointment_id}:{link.owner_user_id}"
             ),
             max_attempts=3,
         )
