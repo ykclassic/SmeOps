@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -35,6 +35,8 @@ from app.services.salon_booking import (
     parse_booking_date,
 )
 from app.services.telegram_outbound import enqueue_telegram_text
+from app.services.telegram_customer_notifications import enqueue_customer_appointment_notification
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.services.whatsapp_outbound import (
     OutboundPolicyViolation,
     enqueue_whatsapp_text,
@@ -50,7 +52,7 @@ PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
 def _normalize_contact_phone(value: str) -> str | None:
-    candidate = re.sub(r"[\\s().-]", "", value)
+    candidate = re.sub(r"[\s().-]", "", value)
     if candidate.startswith("0") and len(candidate) == 11:
         candidate = "+234" + candidate[1:]
     elif candidate.startswith("234") and len(candidate) == 13:
@@ -387,6 +389,273 @@ async def process_channel_conversation_job(
                             )
                         lines.append("Send /cancel or /reschedule to manage an appointment.")
                         reply = "\\n".join(lines)
+
+            elif channel == "telegram" and normalized in {"/cancel", "/reschedule"}:
+                identity_result = await session.execute(
+                    select(TelegramCustomerIdentity).where(
+                        TelegramCustomerIdentity.tenant_id == job.tenant_id,
+                        TelegramCustomerIdentity.telegram_user_id == conversation.telegram_user_id,
+                        TelegramCustomerIdentity.telegram_chat_id == conversation.telegram_chat_id,
+                        TelegramCustomerIdentity.revoked_at.is_(None),
+                    )
+                )
+                identity = identity_result.scalar_one_or_none()
+                if identity is None:
+                    reply = "Share your own Telegram contact first to manage appointments."
+                else:
+                    rows_result = await session.execute(
+                        select(Appointment, Service).join(
+                            Service,
+                            (Service.id == Appointment.service_id)
+                            & (Service.tenant_id == Appointment.tenant_id),
+                        ).where(
+                            Appointment.tenant_id == job.tenant_id,
+                            Appointment.customer_id == identity.customer_id,
+                            Appointment.status == "confirmed",
+                            Appointment.starts_at >= datetime.now(UTC),
+                        ).order_by(Appointment.starts_at).limit(10)
+                    )
+                    rows = rows_result.all()
+                    if not rows:
+                        reply = "You have no upcoming confirmed appointments to manage."
+                    else:
+                        action = "cancel" if normalized == "/cancel" else "reschedule"
+                        context["appointment_management"] = {
+                            "action": action,
+                            "step": "choose",
+                            "appointment_ids": [str(row[0].id) for row in rows],
+                            "customer_id": str(identity.customer_id),
+                        }
+                        lines = [f"Choose an appointment to {action} by replying with its number:"]
+                        for index, (appointment, service) in enumerate(rows, start=1):
+                            local_start = appointment.starts_at.astimezone(timezone)
+                            reference = str(appointment.id).replace("-", "")[:8].upper()
+                            lines.append(
+                                f"{index}. {service.name} — "
+                                f"{local_start.strftime('%a, %d %b %Y %I:%M %p')} "
+                                f"(Ref: {reference})"
+                            )
+                        reply = "\\n".join(lines)
+            elif channel == "telegram" and isinstance(context.get("appointment_management"), dict):
+                management = dict(context["appointment_management"])
+                management_step = management.get("step")
+                action = management.get("action")
+                customer_id = management.get("customer_id")
+                if action not in {"cancel", "reschedule"} or not customer_id:
+                    context.pop("appointment_management", None)
+                    reply = "That appointment-management session expired. Send /appointments to start again."
+                elif management_step == "choose":
+                    choices = management.get("appointment_ids", [])
+                    if not normalized.isdigit() or not 1 <= int(normalized) <= len(choices):
+                        reply = f"Reply with a number from 1 to {len(choices)}."
+                    else:
+                        appointment_id = UUID(choices[int(normalized) - 1])
+                        owned_result = await session.execute(
+                            select(Appointment, Service).join(
+                                Service,
+                                (Service.id == Appointment.service_id)
+                                & (Service.tenant_id == Appointment.tenant_id),
+                            ).where(
+                                Appointment.id == appointment_id,
+                                Appointment.tenant_id == job.tenant_id,
+                                Appointment.customer_id == UUID(customer_id),
+                                Appointment.status == "confirmed",
+                                Appointment.starts_at >= datetime.now(UTC),
+                            )
+                        )
+                        owned = owned_result.one_or_none()
+                        if owned is None:
+                            context.pop("appointment_management", None)
+                            reply = "That appointment is no longer available to manage. Send /appointments to refresh."
+                        else:
+                            appointment, service = owned
+                            management["appointment_id"] = str(appointment.id)
+                            if action == "cancel":
+                                management["step"] = "confirm_cancel"
+                                reply = (
+                                    f"Cancel {service.name} on "
+                                    f"{appointment.starts_at.astimezone(timezone).strftime('%A, %d %B at %I:%M %p')}? "
+                                    "Reply YES to confirm or NO to keep it."
+                                )
+                            else:
+                                management["step"] = "await_date"
+                                reply = "What new date would you like? Send today, tomorrow, a weekday, or YYYY-MM-DD."
+                            context["appointment_management"] = management
+                elif management_step == "confirm_cancel":
+                    if normalized in NO_WORDS:
+                        context.pop("appointment_management", None)
+                        reply = "Cancellation stopped. Your appointment remains confirmed."
+                    elif normalized in YES_WORDS:
+                        result = await session.execute(
+                            select(Appointment, Service).join(
+                                Service,
+                                (Service.id == Appointment.service_id)
+                                & (Service.tenant_id == Appointment.tenant_id),
+                            ).where(
+                                Appointment.id == UUID(management["appointment_id"]),
+                                Appointment.tenant_id == job.tenant_id,
+                                Appointment.customer_id == UUID(customer_id),
+                                Appointment.status == "confirmed",
+                            ).with_for_update(of=Appointment)
+                        )
+                        row = result.one_or_none()
+                        if row is None:
+                            reply = "That appointment can no longer be cancelled."
+                        else:
+                            appointment, service = row
+                            now = datetime.now(UTC)
+                            appointment.status = "cancelled"
+                            appointment.cancelled_at = now
+                            session.add(AuditEvent(
+                                tenant_id=job.tenant_id,
+                                actor_user_id=None,
+                                event_type="appointment.cancelled.customer",
+                                subject_type="appointment",
+                                subject_id=appointment.id,
+                                payload={"cancelled_at": now.isoformat(), "source": "telegram"},
+                            ))
+                            await enqueue_appointment_owner_alerts(
+                                session,
+                                tenant_id=job.tenant_id,
+                                appointment_id=appointment.id,
+                                event_type="appointment.cancelled",
+                            )
+                            reply = "Your appointment has been cancelled. The business has been notified."
+                        context.pop("appointment_management", None)
+                    else:
+                        reply = "Please reply YES to cancel or NO to keep the appointment."
+                elif management_step == "await_date":
+                    requested_day = parse_booking_date(
+                        normalized, timezone=timezone, now=datetime.now(UTC)
+                    )
+                    if requested_day is None or requested_day < datetime.now(timezone).date():
+                        reply = "I couldn't identify a future date. Send a weekday or YYYY-MM-DD."
+                    else:
+                        appointment_result = await session.execute(
+                            select(Appointment, Service).join(
+                                Service,
+                                (Service.id == Appointment.service_id)
+                                & (Service.tenant_id == Appointment.tenant_id),
+                            ).where(
+                                Appointment.id == UUID(management["appointment_id"]),
+                                Appointment.tenant_id == job.tenant_id,
+                                Appointment.customer_id == UUID(customer_id),
+                                Appointment.status == "confirmed",
+                            )
+                        )
+                        row = appointment_result.one_or_none()
+                        if row is None:
+                            context.pop("appointment_management", None)
+                            reply = "That appointment is no longer available to reschedule."
+                        else:
+                            appointment, service = row
+                            slots = await get_available_slots(
+                                session,
+                                tenant_id=job.tenant_id,
+                                service_id=service.id,
+                                day=requested_day,
+                                limit=48,
+                                exclude_appointment_id=appointment.id,
+                            )
+                            if not slots:
+                                reply = "There are no available times on that date. Send another date."
+                            else:
+                                management["step"] = "choose_slot"
+                                management["requested_date"] = requested_day.isoformat()
+                                management["available_slots"] = [slot.isoformat() for slot in slots]
+                                context["appointment_management"] = management
+                                lines = [f"Available times on {requested_day.isoformat()}:"]
+                                lines.extend(
+                                    f"{index}. {slot.astimezone(timezone).strftime('%I:%M %p')}"
+                                    for index, slot in enumerate(slots, start=1)
+                                )
+                                lines.append("Reply with the number of your preferred time.")
+                                reply = "\\n".join(lines)
+                elif management_step == "choose_slot":
+                    slots = management.get("available_slots", [])
+                    if not normalized.isdigit() or not 1 <= int(normalized) <= len(slots):
+                        reply = f"Reply with a number from 1 to {len(slots)}."
+                    else:
+                        selected = datetime.fromisoformat(slots[int(normalized) - 1])
+                        management["new_starts_at"] = selected.isoformat()
+                        management["step"] = "confirm_reschedule"
+                        context["appointment_management"] = management
+                        reply = (
+                            f"Reschedule to {selected.astimezone(timezone).strftime('%A, %d %B %Y at %I:%M %p')}? "
+                            "Reply YES to confirm or NO to stop."
+                        )
+                elif management_step == "confirm_reschedule":
+                    if normalized in NO_WORDS:
+                        context.pop("appointment_management", None)
+                        reply = "Rescheduling stopped. Your original appointment remains unchanged."
+                    elif normalized in YES_WORDS:
+                        result = await session.execute(
+                            select(Appointment, Service).join(
+                                Service,
+                                (Service.id == Appointment.service_id)
+                                & (Service.tenant_id == Appointment.tenant_id),
+                            ).where(
+                                Appointment.id == UUID(management["appointment_id"]),
+                                Appointment.tenant_id == job.tenant_id,
+                                Appointment.customer_id == UUID(customer_id),
+                                Appointment.status == "confirmed",
+                            ).with_for_update(of=Appointment)
+                        )
+                        row = result.one_or_none()
+                        if row is None:
+                            reply = "That appointment can no longer be rescheduled."
+                        else:
+                            appointment, service = row
+                            old_start, old_end = appointment.starts_at, appointment.ends_at
+                            new_start = datetime.fromisoformat(management["new_starts_at"]).astimezone(UTC)
+                            requested_day = datetime.fromisoformat(management["requested_date"]).date()
+                            current_slots = await get_available_slots(
+                                session,
+                                tenant_id=job.tenant_id,
+                                service_id=service.id,
+                                day=requested_day,
+                                limit=48,
+                                exclude_appointment_id=appointment.id,
+                            )
+                            if new_start not in current_slots:
+                                reply = "That time is no longer available. Send /reschedule to try again."
+                            else:
+                                now = datetime.now(UTC)
+                                appointment.starts_at = new_start
+                                appointment.ends_at = new_start + timedelta(minutes=service.duration_minutes)
+                                appointment.rescheduled_at = now
+                                session.add(AuditEvent(
+                                    tenant_id=job.tenant_id,
+                                    actor_user_id=None,
+                                    event_type="appointment.rescheduled.customer",
+                                    subject_type="appointment",
+                                    subject_id=appointment.id,
+                                    payload={
+                                        "previous_starts_at": old_start.isoformat(),
+                                        "previous_ends_at": old_end.isoformat(),
+                                        "starts_at": appointment.starts_at.isoformat(),
+                                        "ends_at": appointment.ends_at.isoformat(),
+                                        "rescheduled_at": now.isoformat(),
+                                        "source": "telegram",
+                                    },
+                                ))
+                                await enqueue_appointment_owner_alerts(
+                                    session,
+                                    tenant_id=job.tenant_id,
+                                    appointment_id=appointment.id,
+                                    event_type="appointment.rescheduled",
+                                )
+                                reply = (
+                                    "Your appointment has been rescheduled to "
+                                    f"{appointment.starts_at.astimezone(timezone).strftime('%A, %d %B %Y at %I:%M %p')}. "
+                                    "The business has been notified."
+                                )
+                        context.pop("appointment_management", None)
+                    else:
+                        reply = "Please reply YES to confirm the new time or NO to stop."
+                else:
+                    context.pop("appointment_management", None)
+                    reply = "That appointment-management session expired. Send /appointments to start again."
             elif step == "awaiting_service":
                 services_result = await session.execute(
                     select(Service)
