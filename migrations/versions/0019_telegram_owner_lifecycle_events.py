@@ -1,6 +1,6 @@
 """Add lifecycle event type to Telegram owner notifications.
 
-Revision ID: 0019_telegram_owner_lifecycle_events
+Revision ID: 0019_tg_owner_lifecycle
 Revises: 0018_telegram_customer_identity
 """
 import sqlalchemy as sa
