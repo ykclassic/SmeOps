@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0020_telegram_contact_proof"
-down_revision = "0019_telegram_owner_lifecycle_events"
+down_revision = "0019_tg_owner_lifecycle"
 branch_labels = None
 depends_on = None
 
