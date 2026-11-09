@@ -113,8 +113,10 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
         reference = str(appointment.id).replace("-", "")[:8].upper()
         event_title = {
             "appointment.created": "NEW APPOINTMENT CONFIRMED",
-            "appointment.cancelled": "APPOINTMENT CANCELLED BY CUSTOMER",
-            "appointment.rescheduled": "APPOINTMENT RESCHEDULED BY CUSTOMER",
+            "appointment.cancelled.business": "APPOINTMENT CANCELLED BY BUSINESS",
+            "appointment.cancelled.customer": "APPOINTMENT CANCELLED BY CUSTOMER",
+            "appointment.rescheduled.business": "APPOINTMENT RESCHEDULED BY BUSINESS",
+            "appointment.rescheduled.customer": "APPOINTMENT RESCHEDULED BY CUSTOMER",
         }.get(notification.event_type, "APPOINTMENT UPDATED")
         body = (
             f"{event_title}\n\n"
