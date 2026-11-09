@@ -1,7 +1,7 @@
 """Persist Telegram shared-contact proof separately from user text.
 
 Revision ID: 0020_telegram_contact_proof
-Revises: 0019_telegram_owner_lifecycle_events
+Revises: 0019_tg_owner_lifecycle
 """
 import sqlalchemy as sa
 from alembic import op
