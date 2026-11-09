@@ -151,5 +151,6 @@ async def enqueue_telegram_text(
         ),
         max_attempts=2,
     )
-    await session.commit()
+    # The caller owns the transaction. Keeping this service commit-free allows
+    # lifecycle mutations, audit records, outbound rows, and jobs to commit atomically.
     return message

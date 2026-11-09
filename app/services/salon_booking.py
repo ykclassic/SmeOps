@@ -34,6 +34,7 @@ async def get_available_slots(
     service_id: UUID,
     day: date,
     limit: int = 3,
+    exclude_appointment_id: UUID | None = None,
 ) -> list[datetime]:
     tenant = await session.get(Tenant, tenant_id)
     if tenant is None or tenant.status != "active":
@@ -74,6 +75,7 @@ async def get_available_slots(
         select(Appointment.starts_at, Appointment.ends_at).where(
             Appointment.tenant_id == tenant_id,
             Appointment.status == "confirmed",
+            Appointment.id != exclude_appointment_id if exclude_appointment_id else True,
             Appointment.starts_at < local_close.astimezone(UTC),
             Appointment.ends_at > local_open.astimezone(UTC),
         )

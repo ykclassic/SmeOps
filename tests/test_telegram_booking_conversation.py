@@ -1,7 +1,8 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,7 @@ from app.models import (
     BackgroundJob,
     Customer,
     TelegramConversationMessage,
+    TelegramCustomerIdentity,
     TelegramOutboundMessage,
     TelegramOwnerNotification,
     TelegramPlatformBot,
@@ -419,6 +421,68 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                 assert sorted(outcomes) == ["booked", "conflict"]
 
             asyncio.run(verify_concurrent_cross_channel_race())
+
+            if phone_input == "__contact__":
+                async def verify_contact_identity():
+                    async with AsyncSessionFactory() as session:
+                        identity_result = await session.execute(
+                            select(TelegramCustomerIdentity).where(
+                                TelegramCustomerIdentity.tenant_id == tenant_id,
+                                TelegramCustomerIdentity.telegram_user_id == str(user_id),
+                                TelegramCustomerIdentity.revoked_at.is_(None),
+                            )
+                        )
+                        return identity_result.scalar_one_or_none()
+
+                assert asyncio.run(verify_contact_identity()) is not None
+
+                new_day = datetime.now(ZoneInfo("Africa/Lagos")).date() + timedelta(days=3)
+                management_steps = (
+                    (8, "/appointments"),
+                    (9, "/reschedule"),
+                    (10, "1"),
+                    (11, new_day.isoformat()),
+                    (12, "1"),
+                    (13, "YES"),
+                    (14, "/cancel"),
+                    (15, "1"),
+                    (16, "YES"),
+                )
+                for sequence, customer_text in management_steps:
+                    update_id = send_customer_message(customer_text, sequence)
+                    asyncio.run(process_inbound(update_id, sequence))
+
+                async def verify_customer_lifecycle():
+                    async with AsyncSessionFactory() as session:
+                        appointment_result = await session.execute(
+                            select(Appointment).where(
+                                Appointment.tenant_id == tenant_id,
+                                Appointment.id == appointments[0].id,
+                            )
+                        )
+                        managed_appointment = appointment_result.scalar_one()
+                        notification_result = await session.execute(
+                            select(TelegramOwnerNotification).where(
+                                TelegramOwnerNotification.tenant_id == tenant_id,
+                                TelegramOwnerNotification.appointment_id == managed_appointment.id,
+                            )
+                        )
+                        events = {
+                            item.event_type
+                            for item in notification_result.scalars().all()
+                        }
+                        return managed_appointment, events
+
+                managed_appointment, lifecycle_events = asyncio.run(
+                    verify_customer_lifecycle()
+                )
+                assert managed_appointment.status == "cancelled"
+                assert managed_appointment.starts_at.astimezone(
+                    ZoneInfo("Africa/Lagos")
+                ).date() == new_day
+                assert "appointment.created" in lifecycle_events
+                assert "appointment.rescheduled.customer" in lifecycle_events
+                assert "appointment.cancelled.customer" in lifecycle_events
 
     finally:
         if tenant_id is not None:

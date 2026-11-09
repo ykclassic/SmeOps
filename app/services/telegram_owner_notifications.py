@@ -12,8 +12,13 @@ async def enqueue_appointment_owner_alerts(
     *,
     tenant_id: UUID,
     appointment_id: UUID,
+    event_type: str = "appointment.created",
+    event_key: str | None = None,
 ) -> int:
-    """Queue one durable, tenant-scoped alert for each linked active owner."""
+    """Queue one durable, tenant-scoped alert for each lifecycle event and owner."""
+    resolved_event_key = event_key or f"{event_type}:{appointment_id}"
+    if not 1 <= len(resolved_event_key) <= 160:
+        raise ValueError("Invalid Telegram owner notification event key")
     links_result = await session.execute(
         select(TelegramOwnerLink)
         .join(
@@ -38,7 +43,7 @@ async def enqueue_appointment_owner_alerts(
             select(TelegramOwnerNotification).where(
                 TelegramOwnerNotification.tenant_id == tenant_id,
                 TelegramOwnerNotification.owner_user_id == link.owner_user_id,
-                TelegramOwnerNotification.appointment_id == appointment_id,
+                TelegramOwnerNotification.event_key == resolved_event_key,
             )
         )
         if existing_result.scalar_one_or_none() is not None:
@@ -48,6 +53,8 @@ async def enqueue_appointment_owner_alerts(
             tenant_id=tenant_id,
             owner_user_id=link.owner_user_id,
             appointment_id=appointment_id,
+            event_type=event_type,
+            event_key=resolved_event_key,
             status="queued",
         )
         session.add(notification)
@@ -58,7 +65,7 @@ async def enqueue_appointment_owner_alerts(
             job_type="telegram.owner_appointment_alert",
             payload={"notification_id": str(notification.id)},
             idempotency_key=(
-                f"tg:owner-alert:{appointment_id}:{link.owner_user_id}"
+                f"tg:owner-alert:{resolved_event_key}:{link.owner_user_id}"
             ),
             max_attempts=3,
         )

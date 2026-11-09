@@ -28,6 +28,7 @@ from app.schemas.business import (
     ServiceCreate,
     ServiceResponse,
 )
+from app.services.telegram_customer_notifications import enqueue_customer_appointment_notification
 from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
 router = APIRouter(tags=["business operations"])
@@ -178,6 +179,60 @@ async def get_business_hours(session: DbSession, user: CurrentUser) -> list[Busi
         )
         for row in result.scalars().all()
     ]
+
+
+async def _queue_customer_lifecycle_message(
+    session: DbSession,
+    *,
+    tenant: Tenant,
+    appointment: Appointment,
+    customer: Customer,
+    service: Service,
+    event_type: str,
+    event_id: UUID,
+    previous_starts_at: datetime | None = None,
+) -> None:
+    timezone = ZoneInfo(tenant.business_timezone)
+    local_start = appointment.starts_at.astimezone(timezone)
+    reference = str(appointment.id).replace("-", "")[:8].upper()
+    lines = [
+        f"Update from {tenant.name}",
+        f"Reference: {reference}",
+        f"Service: {service.name}",
+    ]
+    if event_type == "appointment.cancelled":
+        lines.extend([
+            "Your appointment has been cancelled by the business.",
+            f"Previous date: {local_start.strftime('%A, %d %B %Y')}",
+            f"Previous time: {local_start.strftime('%I:%M %p')}",
+        ])
+    else:
+        old_local = previous_starts_at.astimezone(timezone) if previous_starts_at else None
+        lines.append("Your appointment has been rescheduled by the business.")
+        if old_local is not None:
+            lines.append(f"Previous: {old_local.strftime('%A, %d %B %Y at %I:%M %p')}")
+        lines.extend([
+            f"New date: {local_start.strftime('%A, %d %B %Y')}",
+            f"New time: {local_start.strftime('%I:%M %p')}",
+        ])
+    queued = await enqueue_customer_appointment_notification(
+        session,
+        tenant_id=tenant.id,
+        customer_id=customer.id,
+        body="\n".join(lines),
+        idempotency_key=f"customer-lifecycle:{event_id}",
+    )
+    if not queued:
+        # No phone/chat is inferred. The business action remains valid; this
+        # audit event makes the skipped delivery observable without storing PII.
+        session.add(AuditEvent(
+            tenant_id=tenant.id,
+            actor_user_id=None,
+            event_type="telegram.customer_notification.unavailable",
+            subject_type="appointment",
+            subject_id=appointment.id,
+            payload={"lifecycle_event": event_type},
+        ))
 
 
 @router.post(
@@ -384,10 +439,18 @@ async def cancel_appointment(
         raise HTTPException(status_code=409, detail="Appointment is not cancellable")
 
     now = datetime.now(UTC)
+    event_id = uuid4()
     appointment.status = "cancelled"
     appointment.cancelled_at = now
+    service_result = await session.execute(
+        select(Service).where(Service.id == appointment.service_id, Service.tenant_id == tenant.id)
+    )
+    service = service_result.scalar_one_or_none()
+    if service is None:
+        raise HTTPException(status_code=409, detail="Appointment service is unavailable")
     session.add(
         AuditEvent(
+            id=event_id,
             tenant_id=tenant.id,
             actor_user_id=user.id,
             event_type="appointment.cancelled",
@@ -395,6 +458,16 @@ async def cancel_appointment(
             subject_id=appointment.id,
             payload={"cancelled_at": now.isoformat()},
         )
+    )
+    await _queue_customer_lifecycle_message(
+        session, tenant=tenant, appointment=appointment, customer=customer,
+        service=service, event_type="appointment.cancelled",
+        event_id=event_id,
+    )
+    await enqueue_appointment_owner_alerts(
+        session, tenant_id=tenant.id, appointment_id=appointment.id,
+        event_type="appointment.cancelled.business",
+        event_key=f"appointment.cancelled.business:{event_id}",
     )
     await session.commit()
     return _appointment_response(appointment, customer)
@@ -568,10 +641,12 @@ async def reschedule_appointment(
 
     old_start, old_end = appointment.starts_at, appointment.ends_at
     now = datetime.now(UTC)
+    event_id = uuid4()
     appointment.starts_at = new_start
     appointment.ends_at = new_end
     appointment.rescheduled_at = now
     session.add(AuditEvent(
+        id=event_id,
         tenant_id=tenant.id,
         actor_user_id=user.id,
         event_type="appointment.rescheduled",
@@ -585,5 +660,16 @@ async def reschedule_appointment(
             "rescheduled_at": now.isoformat(),
         },
     ))
+    await _queue_customer_lifecycle_message(
+        session, tenant=tenant, appointment=appointment, customer=customer,
+        service=service, event_type="appointment.rescheduled",
+        previous_starts_at=old_start,
+        event_id=event_id,
+    )
+    await enqueue_appointment_owner_alerts(
+        session, tenant_id=tenant.id, appointment_id=appointment.id,
+        event_type="appointment.rescheduled.business",
+        event_key=f"appointment.rescheduled.business:{event_id}",
+    )
     await session.commit()
     return _appointment_response(appointment, customer)
