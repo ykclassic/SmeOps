@@ -144,6 +144,8 @@ class TelegramConversationMessage(UUIDPrimaryKey, TimestampMixin, Base):
     provider_message_id: Mapped[str] = mapped_column(String(80), nullable=False)
     direction: Mapped[Literal["inbound", "outbound"]] = mapped_column(String(12), nullable=False)
     body_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contact_phone_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contact_user_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     delivery_status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="received", server_default=text("'received'")
     )
