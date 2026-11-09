@@ -33,7 +33,6 @@ from app.services.salon_booking import (
     get_available_slots,
     parse_booking_date,
 )
-from app.services.telegram_customer_notifications import enqueue_customer_appointment_notification
 from app.services.telegram_outbound import enqueue_telegram_text
 from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.services.whatsapp_outbound import (
@@ -339,7 +338,10 @@ async def process_channel_conversation_job(
                         str(telegram_contact.get("phone_number", ""))
                     )
                     if booking_phone is None:
-                        reply = "That contact did not contain a valid phone number. Please share your contact again."
+                        reply = (
+                            "That contact did not contain a valid phone number. "
+                            "Please share your contact again."
+                        )
                     else:
                         customer_phone = booking_phone
                         booking["customer_phone"] = booking_phone
@@ -352,8 +354,9 @@ async def process_channel_conversation_job(
                         )
                 elif verified_customer is None:
                     reply = (
-                        "I couldn't verify that contact against a customer record for this business. "
-                        "Please ask the business to create your customer record or appointment first, "
+                        "I couldn't verify that contact against a customer record "
+                        "for this business. Please ask the business to create your "
+                        "customer record or appointment first, "
                         "then share your own Telegram contact again."
                     )
                 else:
@@ -394,7 +397,8 @@ async def process_channel_conversation_job(
                 if identity is None:
                     reply = (
                         "To view your appointments, share your own Telegram contact first. "
-                        "Tap the attachment icon in Telegram, choose Contact, then select Share My Contact."
+                        "Tap the attachment icon in Telegram, choose Contact, "
+                        "then select Share My Contact."
                     )
                 else:
                     appointments_result = await session.execute(
@@ -418,7 +422,8 @@ async def process_channel_conversation_job(
                             local_start = appointment.starts_at.astimezone(timezone)
                             reference = str(appointment.id).replace("-", "")[:8].upper()
                             lines.append(
-                                f"{index}. {service.name} — {local_start.strftime('%a, %d %b %Y %I:%M %p')} "
+                                f"{index}. {service.name} — "
+                                f"{local_start.strftime('%a, %d %b %Y %I:%M %p')} "
                                 f"(Ref: {reference})"
                             )
                         lines.append("Send /cancel or /reschedule to manage an appointment.")
@@ -438,7 +443,8 @@ async def process_channel_conversation_job(
                 if identity is None:
                     reply = (
                         "Share your own Telegram contact first to manage appointments. "
-                        "In Telegram, tap the attachment icon, choose Contact, then select Share My Contact."
+                        "In Telegram, tap the attachment icon, choose Contact, "
+                        "then select Share My Contact."
                     )
                 else:
                     rows_result = await session.execute(
@@ -491,7 +497,10 @@ async def process_channel_conversation_job(
                     or expires_at <= datetime.now(UTC)
                 ):
                     context.pop("appointment_management", None)
-                    reply = "That appointment-management session expired. Send /appointments to start again."
+                    reply = (
+                        "That appointment-management session expired. "
+                        "Send /appointments to start again."
+                    )
                 elif management_step == "choose":
                     choices = management.get("appointment_ids", [])
                     if not normalized.isdigit() or not 1 <= int(normalized) <= len(choices):
@@ -514,7 +523,10 @@ async def process_channel_conversation_job(
                         owned = owned_result.one_or_none()
                         if owned is None:
                             context.pop("appointment_management", None)
-                            reply = "That appointment is no longer available to manage. Send /appointments to refresh."
+                            reply = (
+                                "That appointment is no longer available to manage. "
+                                "Send /appointments to refresh."
+                            )
                         else:
                             appointment, service = owned
                             management["appointment_id"] = str(appointment.id)
@@ -527,7 +539,10 @@ async def process_channel_conversation_job(
                                 )
                             else:
                                 management["step"] = "await_date"
-                                reply = "What new date would you like? Send today, tomorrow, a weekday, or YYYY-MM-DD."
+                                reply = (
+                                    "What new date would you like? Send today, tomorrow, "
+                                    "a weekday, or YYYY-MM-DD."
+                                )
                             context["appointment_management"] = management
                 elif management_step == "confirm_cancel":
                     if normalized in NO_WORDS:
@@ -572,7 +587,10 @@ async def process_channel_conversation_job(
                                 appointment_id=appointment.id,
                                 event_type="appointment.cancelled",
                             )
-                            reply = "Your appointment has been cancelled. The business has been notified."
+                            reply = (
+                                "Your appointment has been cancelled. "
+                                "The business has been notified."
+                            )
                         context.pop("appointment_management", None)
                     else:
                         reply = "Please reply YES to cancel or NO to keep the appointment."
@@ -610,7 +628,10 @@ async def process_channel_conversation_job(
                                 exclude_appointment_id=appointment.id,
                             )
                             if not slots:
-                                reply = "There are no available times on that date. Send another date."
+                                reply = (
+                                    "There are no available times on that date. "
+                                    "Send another date."
+                                )
                             else:
                                 management["step"] = "choose_slot"
                                 management["requested_date"] = requested_day.isoformat()
@@ -633,7 +654,8 @@ async def process_channel_conversation_job(
                         management["step"] = "confirm_reschedule"
                         context["appointment_management"] = management
                         reply = (
-                            f"Reschedule to {selected.astimezone(timezone).strftime('%A, %d %B %Y at %I:%M %p')}? "
+                            "Reschedule to "
+                            f"{selected.astimezone(timezone).strftime('%A, %d %B %Y at %I:%M %p')}? "
                             "Reply YES to confirm or NO to stop."
                         )
                 elif management_step == "confirm_reschedule":
@@ -663,8 +685,12 @@ async def process_channel_conversation_job(
                         else:
                             appointment, service = row
                             old_start, old_end = appointment.starts_at, appointment.ends_at
-                            new_start = datetime.fromisoformat(management["new_starts_at"]).astimezone(UTC)
-                            requested_day = datetime.fromisoformat(management["requested_date"]).date()
+                            new_start = datetime.fromisoformat(
+                                management["new_starts_at"]
+                            ).astimezone(UTC)
+                            requested_day = datetime.fromisoformat(
+                                management["requested_date"]
+                            ).date()
                             current_slots = await get_available_slots(
                                 session,
                                 tenant_id=job.tenant_id,
@@ -674,11 +700,16 @@ async def process_channel_conversation_job(
                                 exclude_appointment_id=appointment.id,
                             )
                             if new_start not in current_slots:
-                                reply = "That time is no longer available. Send /reschedule to try again."
+                                reply = (
+                                    "That time is no longer available. "
+                                    "Send /reschedule to try again."
+                                )
                             else:
                                 now = datetime.now(UTC)
                                 appointment.starts_at = new_start
-                                appointment.ends_at = new_start + timedelta(minutes=service.duration_minutes)
+                                appointment.ends_at = new_start + timedelta(
+                                    minutes=service.duration_minutes
+                                )
                                 appointment.rescheduled_at = now
                                 session.add(AuditEvent(
                                     tenant_id=job.tenant_id,
