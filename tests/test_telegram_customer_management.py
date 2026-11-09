@@ -3,7 +3,10 @@ from uuid import uuid4
 import pytest
 
 from app.jobs.telegram import _persist_telegram_message
-from app.services.conversation_engine import (\n    _normalize_contact_phone,\n    _verify_telegram_customer_contact,\n)
+from app.services.conversation_engine import (
+    _normalize_contact_phone,
+    _verify_telegram_customer_contact,
+)
 
 
 class FakeResult:
