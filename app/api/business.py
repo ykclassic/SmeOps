@@ -28,8 +28,8 @@ from app.schemas.business import (
     ServiceCreate,
     ServiceResponse,
 )
-from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.services.telegram_customer_notifications import enqueue_customer_appointment_notification
+from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 
 router = APIRouter(tags=["business operations"])
 ManagerOrOwner = Annotated[User, Depends(require_roles("owner", "manager"))]
