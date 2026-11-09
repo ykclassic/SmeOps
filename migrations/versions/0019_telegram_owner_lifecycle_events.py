@@ -6,7 +6,7 @@ Revises: 0018_telegram_customer_identity
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_telegram_owner_lifecycle_events"
+revision = "0019_tg_owner_lifecycle"
 down_revision = "0018_telegram_customer_identity"
 branch_labels = None
 depends_on = None
