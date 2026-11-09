@@ -343,6 +343,8 @@ async def process_channel_conversation_job(
                     else:
                         customer_phone = booking_phone
                         booking["customer_phone"] = booking_phone
+                        booking["contact_self_shared"] = True
+                        conversation.customer_phone_encrypted = encrypt_telegram_secret(booking_phone)
                         booking["step"] = "awaiting_date"
                         reply = (
                             "Thanks. Your phone number has been added to this booking. "
@@ -873,6 +875,43 @@ async def process_channel_conversation_job(
                             "Reply BOOK to choose another appointment."
                         )
                     else:
+                        if channel == "telegram" and booking.get("contact_self_shared"):
+                            customer_result = await session.execute(
+                                select(Customer).where(
+                                    Customer.tenant_id == job.tenant_id,
+                                    Customer.id == appointment.customer_id,
+                                )
+                            )
+                            booked_customer = customer_result.scalar_one_or_none()
+                            bot_result = await session.execute(
+                                select(TelegramPlatformBot).where(
+                                    TelegramPlatformBot.singleton_key == "platform",
+                                    TelegramPlatformBot.status == "active",
+                                )
+                            )
+                            platform_bot = bot_result.scalar_one_or_none()
+                            if booked_customer is not None and platform_bot is not None:
+                                identity_result = await session.execute(
+                                    select(TelegramCustomerIdentity).where(
+                                        TelegramCustomerIdentity.tenant_id == job.tenant_id,
+                                        TelegramCustomerIdentity.telegram_user_id == conversation.telegram_user_id,
+                                    ).with_for_update()
+                                )
+                                identity = identity_result.scalar_one_or_none()
+                                if identity is None:
+                                    session.add(TelegramCustomerIdentity(
+                                        tenant_id=job.tenant_id,
+                                        customer_id=booked_customer.id,
+                                        platform_bot_id=platform_bot.id,
+                                        telegram_user_id=conversation.telegram_user_id,
+                                        telegram_chat_id=conversation.telegram_chat_id,
+                                        verified_at=datetime.now(UTC),
+                                    ))
+                                elif identity.customer_id == booked_customer.id:
+                                    identity.platform_bot_id = platform_bot.id
+                                    identity.telegram_chat_id = conversation.telegram_chat_id
+                                    identity.revoked_at = None
+                                    identity.verified_at = datetime.now(UTC)
                         start_local = appointment.starts_at.astimezone(timezone)
                         booking["step"] = "complete"
                         booking["appointment_id"] = str(appointment.id)
