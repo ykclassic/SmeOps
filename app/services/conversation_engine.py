@@ -576,9 +576,11 @@ async def process_channel_conversation_job(
                         else:
                             appointment, service = row
                             now = datetime.now(UTC)
+                            event_id = uuid4()
                             appointment.status = "cancelled"
                             appointment.cancelled_at = now
                             session.add(AuditEvent(
+                                id=event_id,
                                 tenant_id=job.tenant_id,
                                 actor_user_id=None,
                                 event_type="appointment.cancelled.customer",
@@ -591,6 +593,7 @@ async def process_channel_conversation_job(
                                 tenant_id=job.tenant_id,
                                 appointment_id=appointment.id,
                                 event_type="appointment.cancelled",
+                                event_key=f"appointment.cancelled:{event_id}",
                             )
                             reply = (
                                 "Your appointment has been cancelled. "
@@ -712,12 +715,14 @@ async def process_channel_conversation_job(
                                 )
                             else:
                                 now = datetime.now(UTC)
+                                event_id = uuid4()
                                 appointment.starts_at = new_start
                                 appointment.ends_at = new_start + timedelta(
                                     minutes=service.duration_minutes
                                 )
                                 appointment.rescheduled_at = now
                                 session.add(AuditEvent(
+                                    id=event_id,
                                     tenant_id=job.tenant_id,
                                     actor_user_id=None,
                                     event_type="appointment.rescheduled.customer",
@@ -737,6 +742,7 @@ async def process_channel_conversation_job(
                                     tenant_id=job.tenant_id,
                                     appointment_id=appointment.id,
                                     event_type="appointment.rescheduled",
+                                    event_key=f"appointment.rescheduled:{event_id}",
                                 )
                                 new_local = appointment.starts_at.astimezone(timezone)
                                 new_label = new_local.strftime("%A, %d %B %Y at %I:%M %p")
