@@ -346,7 +346,9 @@ async def process_channel_conversation_job(
                         customer_phone = booking_phone
                         booking["customer_phone"] = booking_phone
                         booking["contact_self_shared"] = True
-                        conversation.customer_phone_encrypted = encrypt_telegram_secret(booking_phone)
+                        conversation.customer_phone_encrypted = encrypt_telegram_secret(
+                            booking_phone
+                        )
                         booking["step"] = "awaiting_date"
                         reply = (
                             "Thanks. Your phone number has been added to this booking. "
@@ -532,9 +534,12 @@ async def process_channel_conversation_job(
                             management["appointment_id"] = str(appointment.id)
                             if action == "cancel":
                                 management["step"] = "confirm_cancel"
+                                appointment_local = appointment.starts_at.astimezone(timezone)
+                                appointment_label = appointment_local.strftime(
+                                    "%A, %d %B at %I:%M %p"
+                                )
                                 reply = (
-                                    f"Cancel {service.name} on "
-                                    f"{appointment.starts_at.astimezone(timezone).strftime('%A, %d %B at %I:%M %p')}? "
+                                    f"Cancel {service.name} on {appointment_label}? "
                                     "Reply YES to confirm or NO to keep it."
                                 )
                             else:
@@ -653,9 +658,10 @@ async def process_channel_conversation_job(
                         management["new_starts_at"] = selected.isoformat()
                         management["step"] = "confirm_reschedule"
                         context["appointment_management"] = management
+                        selected_local = selected.astimezone(timezone)
+                        selected_label = selected_local.strftime("%A, %d %B %Y at %I:%M %p")
                         reply = (
-                            "Reschedule to "
-                            f"{selected.astimezone(timezone).strftime('%A, %d %B %Y at %I:%M %p')}? "
+                            f"Reschedule to {selected_label}? "
                             "Reply YES to confirm or NO to stop."
                         )
                 elif management_step == "confirm_reschedule":
@@ -732,9 +738,10 @@ async def process_channel_conversation_job(
                                     appointment_id=appointment.id,
                                     event_type="appointment.rescheduled",
                                 )
+                                new_local = appointment.starts_at.astimezone(timezone)
+                                new_label = new_local.strftime("%A, %d %B %Y at %I:%M %p")
                                 reply = (
-                                    "Your appointment has been rescheduled to "
-                                    f"{appointment.starts_at.astimezone(timezone).strftime('%A, %d %B %Y at %I:%M %p')}. "
+                                    f"Your appointment has been rescheduled to {new_label}. "
                                     "The business has been notified."
                                 )
                         context.pop("appointment_management", None)
@@ -742,7 +749,10 @@ async def process_channel_conversation_job(
                         reply = "Please reply YES to confirm the new time or NO to stop."
                 else:
                     context.pop("appointment_management", None)
-                    reply = "That appointment-management session expired. Send /appointments to start again."
+                    reply = (
+                        "That appointment-management session expired. "
+                        "Send /appointments to start again."
+                    )
             elif step == "awaiting_service":
                 services_result = await session.execute(
                     select(Service)
@@ -931,7 +941,8 @@ async def process_channel_conversation_job(
                                 identity_result = await session.execute(
                                     select(TelegramCustomerIdentity).where(
                                         TelegramCustomerIdentity.tenant_id == job.tenant_id,
-                                        TelegramCustomerIdentity.telegram_user_id == conversation.telegram_user_id,
+                                        TelegramCustomerIdentity.telegram_user_id
+                                        == conversation.telegram_user_id,
                                     ).with_for_update()
                                 )
                                 identity = identity_result.scalar_one_or_none()
