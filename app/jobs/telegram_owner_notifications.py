@@ -117,14 +117,14 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
             "appointment.rescheduled": "APPOINTMENT RESCHEDULED BY CUSTOMER",
         }.get(notification.event_type, "APPOINTMENT UPDATED")
         body = (
-            f"{event_title}\\n\\n"
+            f"{event_title}\n\n"
             f"Business: {tenant.name}\n"
             f"Reference: {reference}\n"
             f"Service: {service.name}\n"
             f"Customer: {customer.name}\n"
-            f"Date: {local_start.strftime('%A, %d %B %Y')}\\n"
-            f"Time: {local_start.strftime('%I:%M %p')}\\n"
-            f"Status: {appointment.status.title()}\\n\\n"
+            f"Date: {local_start.strftime('%A, %d %B %Y')}\n"
+            f"Time: {local_start.strftime('%I:%M %p')}\n"
+            f"Status: {appointment.status.title()}\n\n"
             "Open SmeOps to manage this appointment."
         )
         bot_token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
