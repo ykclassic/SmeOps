@@ -130,14 +130,33 @@ async def reconcile_platform_webhook_on_startup() -> None:
                 for value in owner_chats.scalars().all()
                 if value is not None
             )
+            reconciled_chats = 0
+            failed_chats = 0
             for chat_id in sorted(chat_ids):
-                await ensure_private_chat_commands(
-                    bot_token=token,
-                    bot_id=platform_bot.bot_id,
-                    chat_id=chat_id,
-                    force=True,
-                )
+                try:
+                    await ensure_private_chat_commands(
+                        bot_token=token,
+                        bot_id=platform_bot.bot_id,
+                        chat_id=chat_id,
+                        force=True,
+                    )
+                    reconciled_chats += 1
+                except (TelegramAPIError, TelegramDeliveryUnknown, ValueError):
+                    failed_chats += 1
+                    logger.exception(
+                        "Telegram private-chat command reconciliation failed",
+                        extra={"bot_id": platform_bot.bot_id},
+                    )
             await session.commit()
+            logger.info(
+                "Telegram private-chat command reconciliation completed",
+                extra={
+                    "bot_id": platform_bot.bot_id,
+                    "known_private_chats": len(chat_ids),
+                    "reconciled_private_chats": reconciled_chats,
+                    "failed_private_chats": failed_chats,
+                },
+            )
     except (TelegramAPIError, TelegramDeliveryUnknown, RuntimeError, ValueError):
         logger.exception("Shared Telegram webhook reconciliation failed")
     except Exception:
