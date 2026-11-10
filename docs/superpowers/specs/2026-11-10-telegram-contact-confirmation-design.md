@@ -12,7 +12,7 @@ After the customer supplies the booking name, SmeOps requests the native Telegra
 
 On Yes, validate Telegram sender ownership, perform tenant-scoped customer matching or safe customer creation, establish the verified Telegram customer identity, and continue booking.
 
-On No, request an alternative phone number. It may be stored as unverified booking data, but it must not establish a Telegram identity or authorize appointment history, cancellation, or rescheduling. OTP verification is deferred until an affordable SMS provider is available.
+On No, request an alternative phone number. It may be used to complete the appointment booking and stored as unverified booking data, but it must not establish a Telegram identity or authorize appointment history, cancellation, or rescheduling. OTP verification is deferred until an affordable SMS provider is available.
 
 ## Goals
 - Explicit contact request and confirmation for Telegram booking.
