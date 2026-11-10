@@ -48,6 +48,7 @@ async def test_outbound_worker_sends_and_updates_durable_ledger(monkeypatch):
         status="queued",
         recipient_chat_id="-100123456789",
         body_encrypted="encrypted:Hello",
+        reply_markup=None,
         provider_message_id=None,
         last_error_code=None,
         sent_at=None,
@@ -72,8 +73,8 @@ async def test_outbound_worker_sends_and_updates_durable_ledger(monkeypatch):
     def fake_decrypt(value):
         return value.removeprefix("encrypted:")
 
-    async def fake_send(*, bot_token, chat_id, body):
-        sent.append((bot_token, chat_id, body))
+    async def fake_send(*, bot_token, chat_id, body, reply_markup=None):
+        sent.append((bot_token, chat_id, body, reply_markup))
         return SimpleNamespace(provider_message_id="456")
 
     monkeypatch.setattr(telegram_outbound, "AsyncSessionFactory", fake_session_factory)
