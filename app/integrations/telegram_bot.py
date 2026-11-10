@@ -179,7 +179,12 @@ async def ensure_private_chat_commands(
     Chat-scoped Telegram settings override all_private_chats settings, so
     onboarding must explicitly provision each customer/owner private chat.
     """
-    if not chat_id or not chat_id.isdigit() or len(chat_id) > 80:
+    if (
+        not chat_id
+        or not chat_id.isdigit()
+        or int(chat_id) <= 0
+        or len(chat_id) > 80
+    ):
         raise ValueError("Invalid Telegram private chat identifier")
     cache_key = (bot_id, chat_id)
     if not force and cache_key in _configured_private_chat_commands:
