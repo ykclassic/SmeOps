@@ -13,7 +13,11 @@ from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
     classify_inbound_intent,
 )
-from app.integrations.telegram_bot import contact_request_keyboard, remove_reply_keyboard
+from app.integrations.telegram_bot import (
+    contact_request_keyboard,
+    ensure_private_chat_commands,
+    remove_reply_keyboard,
+)
 from app.jobs.queue import ClaimedJob
 from app.models import (
     Appointment,
@@ -243,6 +247,23 @@ async def process_channel_conversation_job(
             and not getattr(inbound, "contact_phone_encrypted", None)
         ):
             return
+
+        if channel == "telegram":
+            platform_result = await session.execute(
+                select(TelegramPlatformBot).where(
+                    TelegramPlatformBot.singleton_key == "platform",
+                    TelegramPlatformBot.status == "active",
+                )
+            )
+            platform_bot = platform_result.scalar_one_or_none()
+            if platform_bot is None:
+                raise RuntimeError("Active SmeOps Telegram platform bot is unavailable")
+            await ensure_private_chat_commands(
+                bot_token=decrypt_telegram_secret(platform_bot.bot_token_encrypted),
+                bot_id=platform_bot.bot_id,
+                chat_id=conversation.telegram_chat_id,
+            )
+
         if (
             (channel == "whatsapp" and conversation.is_opted_out)
             or conversation.status in {"human_required", "closed"}

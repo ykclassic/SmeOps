@@ -122,3 +122,84 @@ def test_contact_request_keyboard_uses_native_request_contact_button():
     assert keyboard["resize_keyboard"] is True
     assert keyboard["one_time_keyboard"] is True
     assert telegram_bot.remove_reply_keyboard() == {"remove_keyboard": True}
+
+
+
+@pytest.mark.asyncio
+async def test_per_chat_commands_override_conflicting_global_configuration(monkeypatch):
+    FakeClient.requests = []
+    FakeClient.responses = [
+        FakeResponse(True),
+        FakeResponse(True),
+        FakeResponse(telegram_bot.TELEGRAM_CUSTOMER_COMMANDS),
+        FakeResponse({"type": "commands"}),
+    ]
+    monkeypatch.setattr(telegram_bot.httpx, "AsyncClient", FakeClient)
+
+    await telegram_bot.ensure_private_chat_commands(
+        bot_token="123456:fake-test-token",
+        bot_id="9016622451",
+        chat_id="123456789",
+        force=True,
+    )
+
+    requests = FakeClient.requests
+    assert [request["url"].rsplit("/", 1)[-1] for request in requests] == [
+        "setMyCommands",
+        "setChatMenuButton",
+        "getMyCommands",
+        "getChatMenuButton",
+    ]
+    expected_scope = {"type": "chat", "chat_id": 123456789}
+    assert requests[0]["json"]["scope"] == expected_scope
+    assert requests[0]["json"]["commands"] == telegram_bot.TELEGRAM_CUSTOMER_COMMANDS
+    assert requests[1]["json"] == {
+        "chat_id": 123456789,
+        "menu_button": {"type": "commands"},
+    }
+    assert requests[2]["json"]["scope"] == expected_scope
+    assert requests[3]["json"] == {"chat_id": 123456789}
+
+
+@pytest.mark.asyncio
+async def test_per_chat_commands_are_cached_only_after_successful_verification(
+    monkeypatch,
+):
+    FakeClient.requests = []
+    FakeClient.responses = [
+        FakeResponse(True),
+        FakeResponse(True),
+        FakeResponse([]),
+    ]
+    monkeypatch.setattr(telegram_bot.httpx, "AsyncClient", FakeClient)
+
+    with pytest.raises(telegram_bot.TelegramAPIError, match="this private chat"):
+        await telegram_bot.ensure_private_chat_commands(
+            bot_token="123456:fake-test-token",
+            bot_id="9016622451",
+            chat_id="987654321",
+        )
+    assert len(FakeClient.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_per_chat_menu_mismatch_is_rejected(monkeypatch):
+    FakeClient.requests = []
+    FakeClient.responses = [
+        FakeResponse(True),
+        FakeResponse(True),
+        FakeResponse(telegram_bot.TELEGRAM_CUSTOMER_COMMANDS),
+        FakeResponse({"type": "default"}),
+    ]
+    monkeypatch.setattr(telegram_bot.httpx, "AsyncClient", FakeClient)
+
+    with pytest.raises(
+        telegram_bot.TelegramAPIError,
+        match="menu for this private chat",
+    ):
+        await telegram_bot.ensure_private_chat_commands(
+            bot_token="123456:fake-test-token",
+            bot_id="9016622451",
+            chat_id="987654322",
+            force=True,
+        )

@@ -164,6 +164,70 @@ TELEGRAM_PRIVATE_COMMAND_SCOPE = {"type": "all_private_chats"}
 TELEGRAM_COMMANDS_MENU_BUTTON = {"type": "commands"}
 
 
+_configured_private_chat_commands: set[tuple[str, str]] = set()
+
+
+async def ensure_private_chat_commands(
+    *,
+    bot_token: str,
+    bot_id: str,
+    chat_id: str,
+    force: bool = False,
+) -> None:
+    """Apply and verify commands/menu at the exact private-chat scope.
+
+    Chat-scoped Telegram settings override all_private_chats settings, so
+    onboarding must explicitly provision each customer/owner private chat.
+    """
+    if (
+        not chat_id
+        or not chat_id.isdigit()
+        or int(chat_id) <= 0
+        or len(chat_id) > 80
+    ):
+        raise ValueError("Invalid Telegram private chat identifier")
+    cache_key = (bot_id, chat_id)
+    if not force and cache_key in _configured_private_chat_commands:
+        return
+
+    scope = {"type": "chat", "chat_id": int(chat_id)}
+    menu_payload = {
+        "chat_id": int(chat_id),
+        "menu_button": TELEGRAM_COMMANDS_MENU_BUTTON,
+    }
+    await _call_bot_api(
+        bot_token=bot_token,
+        method="setMyCommands",
+        payload={"commands": TELEGRAM_CUSTOMER_COMMANDS, "scope": scope},
+    )
+    await _call_bot_api(
+        bot_token=bot_token,
+        method="setChatMenuButton",
+        payload=menu_payload,
+    )
+
+    registered = await _call_bot_api(
+        bot_token=bot_token,
+        method="getMyCommands",
+        payload={"scope": scope},
+    )
+    if registered != TELEGRAM_CUSTOMER_COMMANDS:
+        raise TelegramAPIError(
+            "Telegram did not confirm the expected commands for this private chat"
+        )
+
+    menu_button = await _call_bot_api(
+        bot_token=bot_token,
+        method="getChatMenuButton",
+        payload={"chat_id": int(chat_id)},
+    )
+    if menu_button.get("type") != "commands":
+        raise TelegramAPIError(
+            "Telegram did not confirm the commands menu for this private chat"
+        )
+    _configured_private_chat_commands.add(cache_key)
+
+
 async def set_bot_commands(*, bot_token: str) -> None:
     """Configure and verify the command list and menu button for private chats."""
     scope = TELEGRAM_PRIVATE_COMMAND_SCOPE
