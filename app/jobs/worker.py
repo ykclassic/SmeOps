@@ -34,15 +34,29 @@ async def run_once(
     handler = handlers.get(job.job_type)
     if handler is None:
         error_code = "handler_not_registered"
+        logger.error(
+            "Background job has no registered handler",
+            extra={
+                "job_id": str(job.id),
+                "job_type": job.job_type,
+                "attempt": job.attempts,
+                "max_attempts": job.max_attempts,
+            },
+        )
     else:
         try:
             await handler(job)
         except Exception as exc:
-            logger.error(
+            # Keep the traceback: without it, production failures are reduced to
+            # an error class and cannot be diagnosed from centralized logs.
+            # Never include job payloads because they may contain customer data.
+            logger.exception(
                 "Background job handler raised an exception",
                 extra={
                     "job_id": str(job.id),
                     "job_type": job.job_type,
+                    "attempt": job.attempts,
+                    "max_attempts": job.max_attempts,
                     "error_type": type(exc).__name__,
                 },
             )
@@ -110,7 +124,7 @@ async def _safe_worker_heartbeat(worker_id: str, *, stopped: bool = False) -> No
     try:
         await _record_worker_heartbeat(worker_id, stopped=stopped)
     except Exception as exc:
-        logger.error(
+        logger.exception(
             "Worker heartbeat persistence failed",
             extra={"worker_id": worker_id, "error_type": type(exc).__name__},
         )
