@@ -137,7 +137,7 @@ async def reconcile_platform_webhook_on_startup() -> None:
                     chat_id=chat_id,
                     force=True,
                 )
-            session.commit()
+            await session.commit()
     except (TelegramAPIError, TelegramDeliveryUnknown, RuntimeError, ValueError):
         logger.exception("Shared Telegram webhook reconciliation failed")
     except Exception:
