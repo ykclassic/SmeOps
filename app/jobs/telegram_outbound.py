@@ -70,6 +70,7 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
         bot_token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
         chat_id = message.recipient_chat_id
         body = decrypt_telegram_secret(message.body_encrypted)
+        reply_markup = message.reply_markup
         message.status = "sending"
         await session.commit()
 
@@ -78,6 +79,7 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
             bot_token=bot_token,
             chat_id=chat_id,
             body=body,
+            reply_markup=reply_markup,
         )
     except (TelegramAPIError, TelegramSendRejected, ValueError):
         new_status = "failed"

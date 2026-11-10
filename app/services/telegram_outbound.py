@@ -25,10 +25,12 @@ def _matches_request(
     *,
     conversation_id: UUID,
     body: str,
+    reply_markup: dict | None,
 ) -> bool:
     return (
         message.conversation_id == conversation_id
         and decrypt_telegram_secret(message.body_encrypted) == body
+        and (message.reply_markup or None) == (reply_markup or None)
     )
 
 
@@ -40,6 +42,7 @@ async def enqueue_telegram_text(
     body: str,
     idempotency_key: str,
     actor_user_id: UUID | None = None,
+    reply_markup: dict | None = None,
 ) -> TelegramOutboundMessage:
     normalized_body = body.strip()
     if not normalized_body or len(normalized_body) > 4096:
@@ -59,6 +62,7 @@ async def enqueue_telegram_text(
             existing,
             conversation_id=conversation_id,
             body=normalized_body,
+            reply_markup=reply_markup,
         ):
             raise TelegramOutboundIdempotencyConflict(
                 "Idempotency key was reused with different message content"
@@ -91,6 +95,7 @@ async def enqueue_telegram_text(
         conversation_id=conversation.id,
         recipient_chat_id=conversation.telegram_chat_id,
         body_encrypted=encrypt_telegram_secret(normalized_body),
+        reply_markup=reply_markup,
         idempotency_key=idempotency_key,
         status="queued",
     )
@@ -110,6 +115,7 @@ async def enqueue_telegram_text(
             duplicate,
             conversation_id=conversation_id,
             body=normalized_body,
+            reply_markup=reply_markup,
         ):
             raise TelegramOutboundIdempotencyConflict(
                 "Idempotency key was concurrently reused with different content"
