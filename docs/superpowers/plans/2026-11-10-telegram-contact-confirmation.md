@@ -37,7 +37,7 @@
 
 **Interfaces**
 - Consumes: existing _normalize_contact_phone(value: str) -> str | None, _verify_telegram_customer_contact(...), contact_request_keyboard(), and remove_reply_keyboard().
-- Produces: persisted booking states awaiting_contact, confirming_contact, awaiting_alternative_phone, and awaiting_date; booking context keys pending_contact_phone and customer_phone. The latter is set as a verified booking number only after accepted contact identity establishment.
+- Produces: persisted booking states awaiting_contact, confirming_contact, awaiting_alternative_phone, and awaiting_date; booking context keys pending_contact_phone and customer_phone. The booking phone may be set from an alternative number but must carry an explicit unverified state; only accepted contact identity establishment marks it verified.
 
 - [ ] Step 1: Write regression tests for legacy-phone bypass and contact request. Prove a Telegram booking with pre-existing conversation.customer_phone_encrypted but no TelegramCustomerIdentity enters awaiting_contact and emits a contact-request keyboard. Assert the old phone is not copied into booking identity or used to skip the prompt.
 - [ ] Step 2: Run the focused regression test and confirm failure. Run: pytest tests/test_telegram_booking_conversation.py -k 'legacy_phone or contact_request' -q. Expected: FAIL because current code advances when the old phone exists.
