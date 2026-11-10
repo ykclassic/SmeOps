@@ -164,7 +164,10 @@ async def test_send_text_includes_reply_keyboard_when_requested(monkeypatch):
     FakeAsyncClient.responses = [FakeResponse({"ok": True, "result": {"message_id": 456}})]
     FakeAsyncClient.requests = []
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-    keyboard = {"keyboard": [[{"text": "Share My Contact", "request_contact": True}]], "resize_keyboard": True}
+    keyboard = {
+        "keyboard": [[{"text": "Share My Contact", "request_contact": True}]],
+        "resize_keyboard": True,
+    }
 
     await send_text_message(
         bot_token="123456:valid-test-token",
