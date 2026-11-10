@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
@@ -69,6 +70,8 @@ async def _verify_telegram_customer_contact(
     tenant_id: UUID,
     conversation: TelegramConversation,
     contact: dict,
+    create_customer: bool = False,
+    customer_name: str | None = None,
 ) -> Customer | None:
     sender_id = str(conversation.telegram_user_id)
     if str(contact.get("user_id", "")) != sender_id:
@@ -84,8 +87,6 @@ async def _verify_telegram_customer_contact(
         )
     )
     customer = customer_result.scalar_one_or_none()
-    if customer is None:
-        return None
 
     bot_result = await session.execute(
         select(TelegramPlatformBot).where(
@@ -104,11 +105,63 @@ async def _verify_telegram_customer_contact(
         ).with_for_update()
     )
     identity = identity_result.scalar_one_or_none()
+
+    chat_identity_result = await session.execute(
+        select(TelegramCustomerIdentity).where(
+            TelegramCustomerIdentity.tenant_id == tenant_id,
+            TelegramCustomerIdentity.telegram_chat_id == conversation.telegram_chat_id,
+        ).with_for_update()
+    )
+    chat_identity = chat_identity_result.scalar_one_or_none()
+    if chat_identity is not None and (
+        identity is None or chat_identity.id != identity.id
+    ):
+        return None
+
+    if customer is None:
+        # An existing Telegram identity cannot be rebound to a new phone/customer
+        # just because a different contact was shared during another booking.
+        if identity is not None or not create_customer or not customer_name:
+            return None
+        customer = Customer(
+            tenant_id=tenant_id,
+            name=customer_name,
+            phone_e164=phone,
+        )
+        try:
+            async with session.begin_nested():
+                session.add(customer)
+                await session.flush()
+        except IntegrityError:
+            customer_result = await session.execute(
+                select(Customer).where(
+                    Customer.tenant_id == tenant_id,
+                    Customer.phone_e164 == phone,
+                )
+            )
+            customer = customer_result.scalar_one_or_none()
+            if customer is None:
+                return None
+
+    customer_identity_result = await session.execute(
+        select(TelegramCustomerIdentity).where(
+            TelegramCustomerIdentity.tenant_id == tenant_id,
+            TelegramCustomerIdentity.customer_id == customer.id,
+        ).with_for_update()
+    )
+    customer_identity = customer_identity_result.scalar_one_or_none()
+    if customer_identity is not None and (
+        identity is None or customer_identity.id != identity.id
+    ):
+        return None
+
     if identity is not None:
-        if identity.customer_id != customer.id:
+        if (
+            identity.customer_id != customer.id
+            or identity.telegram_chat_id != conversation.telegram_chat_id
+        ):
             return None
         identity.platform_bot_id = platform_bot.id
-        identity.telegram_chat_id = conversation.telegram_chat_id
         identity.revoked_at = None
         identity.verified_at = datetime.now(UTC)
     else:
@@ -123,6 +176,18 @@ async def _verify_telegram_customer_contact(
         session.add(identity)
     conversation.customer_phone_encrypted = encrypt_telegram_secret(phone)
     return customer
+
+
+def _contact_confirmation_keyboard() -> dict:
+    return {
+        "keyboard": [[
+            {"text": "Yes, use this number"},
+            {"text": "No, use another number"},
+        ]],
+        "resize_keyboard": True,
+        "one_time_keyboard": True,
+        "input_field_placeholder": "Confirm your contact number",
+    }
 
 
 def _format_price(price_minor: int) -> str:
@@ -306,10 +371,9 @@ async def process_channel_conversation_job(
             customer_phone = decrypt_whatsapp_secret(
                 conversation.customer_phone_encrypted
             )
-        elif conversation.customer_phone_encrypted:
-            customer_phone = decrypt_telegram_secret(
-                conversation.customer_phone_encrypted
-            )
+        elif channel == "telegram":
+            # A legacy encrypted phone is not proof of Telegram contact ownership.
+            customer_phone = None
         reply: str
         booking = dict(context.get("booking") or {})
         ai_intent = None
@@ -347,55 +411,86 @@ async def process_channel_conversation_job(
         else:
             booking = dict(context.get("booking") or {})
             step = booking.get("step")
+            if (
+                channel == "telegram"
+                and step in {
+                    "awaiting_phone",
+                    "awaiting_date",
+                    "awaiting_slot",
+                    "awaiting_confirmation",
+                }
+                and not booking.get("contact_onboarding_complete")
+            ):
+                # Migrate legacy in-progress Telegram bookings through the new
+                # contact gate instead of trusting a phone saved by the old flow.
+                booking.pop("customer_phone", None)
+                booking.pop("customer_phone_encrypted", None)
+                booking.pop("customer_phone_verified", None)
+                booking.pop("contact_self_shared", None)
+                booking.pop("pending_contact_phone", None)
+                booking.pop("pending_contact_phone_encrypted", None)
+                booking["step"] = "awaiting_contact"
+                step = "awaiting_contact"
 
             if telegram_contact is not None and channel == "telegram":
-                verified_customer = await _verify_telegram_customer_contact(
-                    session,
-                    tenant_id=job.tenant_id,
-                    conversation=conversation,
-                    contact=telegram_contact,
-                )
-                if verified_customer is None and booking.get("step") == "awaiting_phone":
-                    # A self-shared contact can supply the phone for a first booking,
-                    # but it does not create a verified customer identity until a
-                    # matching tenant customer record exists.
-                    booking_phone = _normalize_contact_phone(
-                        str(telegram_contact.get("phone_number", ""))
-                    )
-                    if booking_phone is None:
+                if booking.get("step") in {
+                    "awaiting_contact",
+                    "awaiting_phone",
+                    "confirming_contact",
+                    "awaiting_alternative_phone",
+                }:
+                    if str(telegram_contact.get("user_id", "")) != str(
+                        conversation.telegram_user_id
+                    ):
                         reply = (
-                            "That contact did not contain a valid phone number. "
-                            "Please share your contact again."
+                            "That contact belongs to a different Telegram account. "
+                            "Please share your own contact."
                         )
+                        reply_markup = contact_request_keyboard()
+                        booking.pop("pending_contact_phone", None)
+                        booking.pop("pending_contact_phone_encrypted", None)
+                        booking["step"] = "awaiting_contact"
                     else:
-                        customer_phone = booking_phone
-                        booking["customer_phone"] = booking_phone
-                        booking["contact_self_shared"] = True
-                        conversation.customer_phone_encrypted = encrypt_telegram_secret(
-                            booking_phone
+                        pending_phone = _normalize_contact_phone(
+                            str(telegram_contact.get("phone_number", ""))
                         )
-                        booking["step"] = "awaiting_date"
-                        reply = (
-                            "Thanks. Your phone number has been added to this booking. "
-                            "What day would you like to visit?"
-                        )
-                elif verified_customer is None:
-                    reply = (
-                        "I couldn't verify that contact against a customer record "
-                        "for this business. Please ask the business to create your "
-                        "customer record or appointment first, "
-                        "then share your own Telegram contact again."
-                    )
+                        if pending_phone is None:
+                            reply = (
+                                "That contact did not contain a valid phone number. "
+                                "Please share your own Telegram contact again."
+                            )
+                            reply_markup = contact_request_keyboard()
+                            booking.pop("pending_contact_phone", None)
+                            booking.pop("pending_contact_phone_encrypted", None)
+                            booking["step"] = "awaiting_contact"
+                        else:
+                            booking["pending_contact_phone_encrypted"] = (
+                                encrypt_telegram_secret(pending_phone)
+                            )
+                            booking.pop("pending_contact_phone", None)
+                            booking["step"] = "confirming_contact"
+                            reply = (
+                                f"I received {pending_phone} from your Telegram contact. "
+                                "Would you like to use this number for your booking? "
+                                "Choose Yes, use this number or No, use another number."
+                            )
+                            reply_markup = _contact_confirmation_keyboard()
                 else:
-                    customer_phone = verified_customer.phone_e164
-                    if booking.get("step") == "awaiting_phone":
-                        booking["customer_phone"] = customer_phone
-                        booking["step"] = "awaiting_date"
+                    verified_customer = await _verify_telegram_customer_contact(
+                        session,
+                        tenant_id=job.tenant_id,
+                        conversation=conversation,
+                        contact=telegram_contact,
+                    )
+                    if verified_customer is None:
                         reply = (
-                            f"Your contact is verified, {verified_customer.name}. "
-                            "What day would you like to visit?"
+                            "I couldn't verify that contact for this business. "
+                            "Please use the Share My Contact button after starting a booking "
+                            "or ask the business team to check your customer record."
                         )
+                        reply_markup = contact_request_keyboard()
                     else:
+                        customer_phone = verified_customer.phone_e164
                         reply = (
                             f"Your contact is verified for {tenant.name}. "
                             "Use the Telegram menu button to view or manage your appointments."
@@ -841,13 +936,24 @@ async def process_channel_conversation_job(
                     reply = "Please send the name for the appointment (2–160 characters)."
                 else:
                     booking["customer_name"] = customer_name
-                    if channel == "telegram" and not customer_phone:
-                        booking["step"] = "awaiting_phone"
+                    if channel == "telegram":
+                        for key in (
+                            "customer_phone",
+                            "customer_phone_encrypted",
+                            "customer_phone_verified",
+                            "contact_onboarding_complete",
+                            "contact_self_shared",
+                            "pending_contact_phone",
+                            "pending_contact_phone_encrypted",
+                        ):
+                            booking.pop(key, None)
+                        booking["step"] = "awaiting_contact"
                         reply = (
                             f"Thanks, {customer_name}. Before checking availability, "
-                            "please send your phone number in international format "
-                            "(for example +2348012345678), or share your Telegram contact."
+                            "please tap Share My Contact below so I can show you the number "
+                            "Telegram shares, then ask you to confirm it."
                         )
+                        reply_markup = contact_request_keyboard()
                     else:
                         booking["step"] = "awaiting_date"
                         reply = (
@@ -855,33 +961,120 @@ async def process_channel_conversation_job(
                             "Reply with today, tomorrow, a weekday (for example Friday), "
                             "or a date in YYYY-MM-DD format."
                         )
-            elif step == "awaiting_phone":
-                candidate = body.strip()
-                if candidate.startswith("contact:"):
-                    candidate = candidate.removeprefix("contact:").strip()
-                candidate = re.sub(r"[\s().-]", "", candidate)
-                if candidate.startswith("0") and len(candidate) == 11:
-                    candidate = "+234" + candidate[1:]
-                elif candidate.startswith("234") and len(candidate) == 13:
-                    candidate = "+" + candidate
-                if not PHONE_PATTERN.fullmatch(candidate):
+            elif channel == "telegram" and step == "awaiting_contact":
+                reply = (
+                    "Please tap Share My Contact below. I need the number shared "
+                    "by your Telegram account before continuing."
+                )
+                reply_markup = contact_request_keyboard()
+            elif channel == "telegram" and step == "confirming_contact":
+                if normalized in YES_WORDS or normalized in {
+                    "yes use this number",
+                    "yes, use this number",
+                }:
+                    pending_phone_encrypted = booking.get(
+                        "pending_contact_phone_encrypted"
+                    )
+                    pending_phone = (
+                        decrypt_telegram_secret(pending_phone_encrypted)
+                        if pending_phone_encrypted
+                        else ""
+                    )
+                    verified_customer = await _verify_telegram_customer_contact(
+                        session,
+                        tenant_id=job.tenant_id,
+                        conversation=conversation,
+                        contact={
+                            "user_id": conversation.telegram_user_id,
+                            "phone_number": pending_phone,
+                        },
+                        create_customer=True,
+                        customer_name=booking.get("customer_name"),
+                    )
+                    if verified_customer is None:
+                        booking.pop("pending_contact_phone", None)
+                        booking.pop("pending_contact_phone_encrypted", None)
+                        booking["step"] = "awaiting_contact"
+                        reply = (
+                            "I couldn't safely verify that contact for this business. "
+                            "Please share your own Telegram contact again."
+                        )
+                        reply_markup = contact_request_keyboard()
+                    else:
+                        booking["customer_phone_encrypted"] = encrypt_telegram_secret(
+                            verified_customer.phone_e164
+                        )
+                        booking.pop("customer_phone", None)
+                        booking["customer_phone_verified"] = True
+                        booking["contact_onboarding_complete"] = True
+                        booking.pop("pending_contact_phone", None)
+                        booking.pop("pending_contact_phone_encrypted", None)
+                        booking["step"] = "awaiting_date"
+                        reply = (
+                            f"Thanks, {verified_customer.name}. Your contact is confirmed. "
+                            "What day would you like to visit? Reply with today, tomorrow, "
+                            "a weekday, or a date in YYYY-MM-DD format."
+                        )
+                        reply_markup = remove_reply_keyboard()
+                elif normalized in NO_WORDS or normalized in {
+                    "no use another number",
+                    "no, use another number",
+                }:
+                    booking.pop("pending_contact_phone", None)
+                    booking.pop("pending_contact_phone_encrypted", None)
+                    booking["step"] = "awaiting_alternative_phone"
                     reply = (
-                        "Please send your phone number in international format, "
-                        "including the country code (for example +2348012345678), "
-                        "or share your Telegram contact."
+                        "What phone number would you like to use for this booking? "
+                        "Send it in international format, for example +2348012345678. "
+                        "This alternative number will remain unverified."
+                    )
+                    reply_markup = remove_reply_keyboard()
+                else:
+                    reply = (
+                        "Please choose Yes, use this number or No, use another number."
+                    )
+                    reply_markup = _contact_confirmation_keyboard()
+            elif channel == "telegram" and step == "awaiting_alternative_phone":
+                candidate = _normalize_contact_phone(body.strip())
+                if candidate is None:
+                    reply = (
+                        "Please send a valid phone number in international format, "
+                        "for example +2348012345678."
                     )
                 else:
-                    customer_phone = candidate
-                    if channel == "telegram":
-                        conversation.customer_phone_encrypted = encrypt_telegram_secret(
-                            candidate
-                        )
-                    booking["customer_phone"] = candidate
+                    booking["customer_phone_encrypted"] = encrypt_telegram_secret(
+                        candidate
+                    )
+                    booking.pop("customer_phone", None)
+                    booking["customer_phone_verified"] = False
+                    booking["contact_onboarding_complete"] = True
                     booking["step"] = "awaiting_date"
                     reply = (
-                        "Thanks. What day would you like to visit? Reply with today, "
-                        "tomorrow, a weekday, or a date in YYYY-MM-DD format."
+                        "Thanks. That number is saved for this booking but is not verified. "
+                        "What day would you like to visit? Reply with today, tomorrow, "
+                        "a weekday, or a date in YYYY-MM-DD format."
                     )
+            elif step == "awaiting_phone":
+                if channel == "telegram":
+                    booking["step"] = "awaiting_contact"
+                    reply = "Please share your own Telegram contact using the button below."
+                    reply_markup = contact_request_keyboard()
+                else:
+                    candidate = _normalize_contact_phone(body.strip())
+                    if candidate is None:
+                        reply = (
+                            "Please send a valid phone number in international format, "
+                            "for example +2348012345678."
+                        )
+                    else:
+                        customer_phone = candidate
+                        booking["customer_phone"] = candidate
+                        booking["step"] = "awaiting_date"
+                        reply = (
+                            "Thanks. What day would you like to visit? Reply with today, "
+                            "tomorrow, a weekday, or a date in YYYY-MM-DD format."
+                        )
+
             elif step == "awaiting_date":
                 requested_day = parse_booking_date(
                     normalized,
@@ -938,9 +1131,28 @@ async def process_channel_conversation_job(
                         "Reply YES to confirm or NO to start again."
                     )
             elif step == "awaiting_confirmation":
-                if normalized in YES_WORDS:
+                if channel == "telegram" and not booking.get(
+                    "contact_onboarding_complete"
+                ):
+                    booking["step"] = "awaiting_contact"
+                    reply = (
+                        "Before I can complete this booking, please share and confirm "
+                        "your own Telegram contact using the button below."
+                    )
+                    reply_markup = contact_request_keyboard()
+                elif normalized in YES_WORDS:
                     try:
-                        booking_phone = booking.get("customer_phone") or customer_phone
+                        if channel == "telegram":
+                            booking_phone_encrypted = booking.get(
+                                "customer_phone_encrypted"
+                            )
+                            booking_phone = (
+                                decrypt_telegram_secret(booking_phone_encrypted)
+                                if booking_phone_encrypted
+                                else None
+                            )
+                        else:
+                            booking_phone = booking.get("customer_phone") or customer_phone
                         if booking_phone and not booking_phone.startswith("+"):
                             booking_phone = "+" + booking_phone
                         if not booking_phone:
@@ -955,6 +1167,10 @@ async def process_channel_conversation_job(
                             conversation_id=conversation.id,
                             booking_attempt_id=UUID(booking["booking_attempt_id"]),
                             source=channel,
+                            update_existing_customer_name=not (
+                                channel == "telegram"
+                                and booking.get("customer_phone_verified") is False
+                            ),
                         )
                     except (BookingConflict, ValueError):
                         booking = {}
@@ -963,48 +1179,6 @@ async def process_channel_conversation_job(
                             "Reply BOOK to choose another appointment."
                         )
                     else:
-                        if channel == "telegram" and booking.get("contact_self_shared"):
-                            customer_result = await session.execute(
-                                select(Customer).where(
-                                    Customer.tenant_id == job.tenant_id,
-                                    Customer.id == appointment.customer_id,
-                                )
-                            )
-                            booked_customer = customer_result.scalar_one_or_none()
-                            bot_result = await session.execute(
-                                select(TelegramPlatformBot).where(
-                                    TelegramPlatformBot.singleton_key == "platform",
-                                    TelegramPlatformBot.status == "active",
-                                )
-                            )
-                            platform_bot = bot_result.scalar_one_or_none()
-                            if (
-                                booked_customer is not None
-                                and platform_bot is not None
-                                and booked_customer.phone_e164 == booking.get("customer_phone")
-                            ):
-                                identity_result = await session.execute(
-                                    select(TelegramCustomerIdentity).where(
-                                        TelegramCustomerIdentity.tenant_id == job.tenant_id,
-                                        TelegramCustomerIdentity.telegram_user_id
-                                        == conversation.telegram_user_id,
-                                    ).with_for_update()
-                                )
-                                identity = identity_result.scalar_one_or_none()
-                                if identity is None:
-                                    session.add(TelegramCustomerIdentity(
-                                        tenant_id=job.tenant_id,
-                                        customer_id=booked_customer.id,
-                                        platform_bot_id=platform_bot.id,
-                                        telegram_user_id=conversation.telegram_user_id,
-                                        telegram_chat_id=conversation.telegram_chat_id,
-                                        verified_at=datetime.now(UTC),
-                                    ))
-                                elif identity.customer_id == booked_customer.id:
-                                    identity.platform_bot_id = platform_bot.id
-                                    identity.telegram_chat_id = conversation.telegram_chat_id
-                                    identity.revoked_at = None
-                                    identity.verified_at = datetime.now(UTC)
                         start_local = appointment.starts_at.astimezone(timezone)
                         booking["step"] = "complete"
                         booking["appointment_id"] = str(appointment.id)

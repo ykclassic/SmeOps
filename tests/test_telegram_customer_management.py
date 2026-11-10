@@ -117,7 +117,36 @@ async def test_contact_shared_by_another_telegram_user_is_not_verified(monkeypat
     _conversation, message = session.records
     assert message.contact_phone_encrypted is None
     assert message.contact_user_id is None
-    assert message.body_encrypted is None
+    assert message.body_encrypted == "cipher:[Telegram contact not verified]"
+
+
+@pytest.mark.asyncio
+async def test_empty_self_shared_contact_is_rejected_with_safe_marker(monkeypatch):
+    session = FakeSession()
+    monkeypatch.setattr(
+        "app.jobs.telegram.encrypt_telegram_secret",
+        lambda value: f"cipher:{value}",
+    )
+
+    await _persist_telegram_message(
+        session,
+        tenant_id=uuid4(),
+        payload={
+            "message": {
+                "message_id": 105,
+                "date": 1_798_000_000,
+                "chat": {"id": 123456, "type": "private"},
+                "from": {"id": 123456, "first_name": "Ada"},
+                "contact": {"user_id": 123456, "phone_number": ""},
+            }
+        },
+    )
+
+    assert len(session.records) == 2
+    _conversation, message = session.records
+    assert message.contact_phone_encrypted is None
+    assert message.contact_user_id is None
+    assert message.body_encrypted == "cipher:[Telegram contact not verified]"
 
 
 @pytest.mark.asyncio
@@ -166,11 +195,11 @@ async def test_verified_identity_is_bound_to_tenant_customer_and_sender(monkeypa
     customer = SimpleNamespace(id=uuid4(), tenant_id=tenant_id, phone_e164="+2348012345678")
     platform_bot = SimpleNamespace(id=uuid4())
     session = FakeSession()
-    session.values = [customer, platform_bot, None]
+    session.values = [customer, platform_bot, None, None, None]
 
     conversation = SimpleNamespace(
         telegram_user_id="123456",
-        telegram_chat_id="123456",
+        telegram_chat_id="654321",
         customer_phone_encrypted=None,
     )
 
@@ -194,8 +223,172 @@ async def test_verified_identity_is_bound_to_tenant_customer_and_sender(monkeypa
     assert identity.tenant_id == tenant_id
     assert identity.customer_id == customer.id
     assert identity.telegram_user_id == "123456"
-    assert identity.telegram_chat_id == "123456"
+    assert identity.telegram_chat_id == "654321"
     assert "customers.tenant_id" in str(session.statements[0])
+
+
+@pytest.mark.asyncio
+async def test_verified_identity_fails_closed_when_sender_is_bound_to_another_customer(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from app.services import conversation_engine
+    from app.services.conversation_engine import _verify_telegram_customer_contact
+
+    monkeypatch.setattr(
+        conversation_engine,
+        "encrypt_telegram_secret",
+        lambda value: f"cipher:{value}",
+    )
+    tenant_id = uuid4()
+    customer = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, phone_e164="+2348012345678"
+    )
+    platform_bot = SimpleNamespace(id=uuid4())
+    existing_identity = SimpleNamespace(
+        id=uuid4(),
+        customer_id=uuid4(),
+        telegram_chat_id="123456",
+        platform_bot_id=uuid4(),
+        revoked_at=None,
+        verified_at=None,
+    )
+    session = FakeSession()
+    session.values = [
+        customer,
+        platform_bot,
+        existing_identity,
+        existing_identity,
+        None,
+    ]
+    session.statements = []
+
+    async def execute(statement):
+        session.statements.append(statement)
+        return FakeResult(session.values.pop(0))
+
+    session.execute = execute
+    conversation = SimpleNamespace(
+        telegram_user_id="123456",
+        telegram_chat_id="123456",
+        customer_phone_encrypted=None,
+    )
+
+    result = await _verify_telegram_customer_contact(
+        session,
+        tenant_id=tenant_id,
+        conversation=conversation,
+        contact={"user_id": "123456", "phone_number": "+2348012345678"},
+    )
+
+    assert result is None
+    assert conversation.customer_phone_encrypted is None
+    assert session.records == []
+    assert existing_identity.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_verified_identity_fails_closed_when_chat_is_bound_to_another_sender(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from app.services import conversation_engine
+    from app.services.conversation_engine import _verify_telegram_customer_contact
+
+    monkeypatch.setattr(
+        conversation_engine,
+        "encrypt_telegram_secret",
+        lambda value: f"cipher:{value}",
+    )
+    tenant_id = uuid4()
+    customer = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, phone_e164="+2348012345678"
+    )
+    platform_bot = SimpleNamespace(id=uuid4())
+    conflicting_identity = SimpleNamespace(
+        id=uuid4(),
+        customer_id=uuid4(),
+        telegram_user_id="999999",
+        telegram_chat_id="123456",
+    )
+    session = FakeSession()
+    session.values = [customer, platform_bot, None, conflicting_identity]
+    session.statements = []
+
+    async def execute(statement):
+        session.statements.append(statement)
+        return FakeResult(session.values.pop(0))
+
+    session.execute = execute
+    conversation = SimpleNamespace(
+        telegram_user_id="123456",
+        telegram_chat_id="123456",
+        customer_phone_encrypted=None,
+    )
+
+    result = await _verify_telegram_customer_contact(
+        session,
+        tenant_id=tenant_id,
+        conversation=conversation,
+        contact={"user_id": "123456", "phone_number": "+2348012345678"},
+    )
+
+    assert result is None
+    assert session.records == []
+    assert conversation.customer_phone_encrypted is None
+
+
+@pytest.mark.asyncio
+async def test_confirming_different_phone_does_not_create_orphan_customer(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from app.services import conversation_engine
+    from app.services.conversation_engine import _verify_telegram_customer_contact
+
+    monkeypatch.setattr(
+        conversation_engine,
+        "encrypt_telegram_secret",
+        lambda value: f"cipher:{value}",
+    )
+    tenant_id = uuid4()
+    platform_bot = SimpleNamespace(id=uuid4())
+    existing_identity = SimpleNamespace(
+        id=uuid4(),
+        customer_id=uuid4(),
+        telegram_chat_id="123456",
+        platform_bot_id=platform_bot.id,
+        revoked_at=None,
+        verified_at=None,
+    )
+    session = FakeSession()
+    session.values = [None, platform_bot, existing_identity, existing_identity]
+
+    async def execute(_statement):
+        return FakeResult(session.values.pop(0))
+
+    session.execute = execute
+    conversation = SimpleNamespace(
+        telegram_user_id="123456",
+        telegram_chat_id="123456",
+        customer_phone_encrypted=None,
+    )
+
+    result = await _verify_telegram_customer_contact(
+        session,
+        tenant_id=tenant_id,
+        conversation=conversation,
+        contact={"user_id": "123456", "phone_number": "+2348098765432"},
+        create_customer=True,
+        customer_name="Ada Lovelace",
+    )
+
+    assert result is None
+    assert session.records == []
+    assert conversation.customer_phone_encrypted is None
 
 
 @pytest.mark.asyncio

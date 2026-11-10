@@ -107,6 +107,7 @@ async def create_appointment_booking(
     conversation_id: UUID,
     booking_attempt_id: UUID,
     source: str = "whatsapp",
+    update_existing_customer_name: bool = True,
 ) -> Appointment:
     tenant_result = await session.execute(
         select(Tenant)
@@ -209,7 +210,7 @@ async def create_appointment_booking(
         )
         session.add(customer)
         await session.flush()
-    else:
+    elif update_existing_customer_name:
         customer.name = customer_name
 
     owner_result = await session.execute(

@@ -13,11 +13,11 @@ from app.db.session import AsyncSessionFactory
 from app.integrations.telegram_bot import (
     TelegramAPIError,
     TelegramDeliveryUnknown,
+    ensure_private_chat_commands,
     get_bot_identity,
     get_webhook_info,
     register_webhook,
     set_bot_commands,
-    ensure_private_chat_commands,
 )
 from app.models import (
     TelegramConversation,

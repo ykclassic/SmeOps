@@ -22,6 +22,7 @@ from app.models import (
     Appointment,
     BackgroundJob,
     Customer,
+    TelegramConversation,
     TelegramConversationMessage,
     TelegramCustomerIdentity,
     TelegramOutboundMessage,
@@ -63,6 +64,14 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
         telegram_api,
         "_ensure_platform_webhook",
         fake_ensure_platform_webhook,
+    )
+
+    async def fake_ensure_private_chat_commands(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.conversation_engine.ensure_private_chat_commands",
+        fake_ensure_private_chat_commands,
     )
 
     slug = f"telegram-booking-{uuid4().hex[:10]}"
@@ -247,6 +256,11 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         "phone_number": "08012345678",
                         "user_id": user_id,
                     }
+                elif text == "__foreign_contact__":
+                    message_payload["contact"] = {
+                        "phone_number": "+2348099999998",
+                        "user_id": user_id + 1,
+                    }
                 else:
                     message_payload["text"] = text
                 payload = {
@@ -288,10 +302,123 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
             start_update_id = send_customer_start()
             asyncio.run(process_inbound(start_update_id, 1))
 
-            steps = ("1", "Ada Lovelace", phone_input, "tomorrow", "1", "YES")
-            for sequence, customer_text in enumerate(steps, start=2):
+            async def seed_legacy_phone():
+                async with AsyncSessionFactory() as session:
+                    result = await session.execute(
+                        select(TelegramConversation).where(
+                            TelegramConversation.tenant_id == tenant_id,
+                            TelegramConversation.telegram_chat_id == str(chat_id),
+                        )
+                    )
+                    conversation = result.scalar_one()
+                    conversation.customer_phone_encrypted = encrypt_telegram_secret(
+                        "+2348099999999"
+                    )
+                    await session.commit()
+
+            asyncio.run(seed_legacy_phone())
+
+            for sequence, customer_text in enumerate(
+                ("1", "Ada Lovelace"), start=2
+            ):
                 update_id = send_customer_message(customer_text, sequence)
                 asyncio.run(process_inbound(update_id, sequence))
+
+            async def seed_legacy_booking_state():
+                async with AsyncSessionFactory() as session:
+                    result = await session.execute(
+                        select(TelegramConversation).where(
+                            TelegramConversation.tenant_id == tenant_id,
+                            TelegramConversation.telegram_chat_id == str(chat_id),
+                        )
+                    )
+                    conversation = result.scalar_one()
+                    context = dict(conversation.context or {})
+                    booking = dict(context.get("booking") or {})
+                    booking["step"] = "awaiting_date"
+                    booking["customer_phone"] = "+2348099999999"
+                    booking.pop("contact_onboarding_complete", None)
+                    context["booking"] = booking
+                    conversation.context = context
+                    await session.commit()
+
+            asyncio.run(seed_legacy_booking_state())
+
+            if phone_input != "__contact__":
+                async def seed_existing_unverified_customer():
+                    async with AsyncSessionFactory() as session:
+                        session.add(
+                            Customer(
+                                tenant_id=tenant_id,
+                                name="Existing Customer",
+                                phone_e164=expected_phone,
+                            )
+                        )
+                        await session.commit()
+
+                asyncio.run(seed_existing_unverified_customer())
+
+            steps = ["__foreign_contact__", "__contact__"]
+            if phone_input == "__contact__":
+                steps.extend(["Yes, use this number", "Yes, use this number"])
+            else:
+                steps.extend(["No, use another number", phone_input])
+            steps.extend(["tomorrow", "1", "YES"])
+            for sequence, customer_text in enumerate(steps, start=4):
+                update_id = send_customer_message(customer_text, sequence)
+                asyncio.run(process_inbound(update_id, sequence))
+                if customer_text == "__foreign_contact__":
+                    async def inspect_rejected_contact(message_sequence=sequence):
+                        async with AsyncSessionFactory() as session:
+                            result = await session.execute(
+                                select(TelegramConversationMessage).where(
+                                    TelegramConversationMessage.tenant_id == tenant_id,
+                                    TelegramConversationMessage.provider_message_id
+                                    == f"{chat_id}:{message_sequence}",
+                                    TelegramConversationMessage.direction == "inbound",
+                                )
+                            )
+                            return result.scalar_one()
+
+                    rejected_contact = asyncio.run(inspect_rejected_contact())
+                    assert rejected_contact.contact_phone_encrypted is None
+                    assert rejected_contact.contact_user_id is None
+                    assert decrypt_telegram_secret(
+                        rejected_contact.body_encrypted
+                    ) == "[Telegram contact not verified]"
+                if customer_text == "__contact__":
+                    async def inspect_pending_contact():
+                        async with AsyncSessionFactory() as session:
+                            result = await session.execute(
+                                select(TelegramConversation).where(
+                                    TelegramConversation.tenant_id == tenant_id,
+                                    TelegramConversation.telegram_chat_id == str(chat_id),
+                                )
+                            )
+                            return dict(result.scalar_one().context["booking"])
+
+                    pending_booking = asyncio.run(inspect_pending_contact())
+                    assert "pending_contact_phone" not in pending_booking
+                    assert decrypt_telegram_secret(
+                        pending_booking["pending_contact_phone_encrypted"]
+                    ) == expected_phone
+                if phone_input != "__contact__" and customer_text == phone_input:
+                    async def inspect_alternative_phone():
+                        async with AsyncSessionFactory() as session:
+                            result = await session.execute(
+                                select(TelegramConversation).where(
+                                    TelegramConversation.tenant_id == tenant_id,
+                                    TelegramConversation.telegram_chat_id == str(chat_id),
+                                )
+                            )
+                            return dict(result.scalar_one().context["booking"])
+
+                    alternative_booking = asyncio.run(inspect_alternative_phone())
+                    assert "customer_phone" not in alternative_booking
+                    assert decrypt_telegram_secret(
+                        alternative_booking["customer_phone_encrypted"]
+                    ) == expected_phone
+                    assert alternative_booking["customer_phone_verified"] is False
 
             async def inspect_results():
                 async with AsyncSessionFactory() as session:
@@ -329,6 +456,15 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         )
                     )
                     alert_jobs = list(alert_jobs_result.scalars().all())
+                    conversation_result = await session.execute(
+                        select(TelegramConversation).where(
+                            TelegramConversation.tenant_id == tenant_id,
+                            TelegramConversation.telegram_chat_id == str(chat_id),
+                        )
+                    )
+                    booking_context = dict(
+                        conversation_result.scalar_one().context["booking"]
+                    )
                     return (
                         appointments,
                         outbound,
@@ -336,6 +472,7 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                         customers,
                         notifications,
                         alert_jobs,
+                        booking_context,
                     )
 
             (
@@ -345,14 +482,50 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                 customers,
                 notifications,
                 alert_jobs,
+                booking_context,
             ) = asyncio.run(inspect_results())
             assert len(appointments) == 1
             appointment = appointments[0]
             assert appointment.status == "confirmed"
-            assert len(outbound) == 7
-            assert len(history) == 7
+            expected_message_count = 10
+            assert len(outbound) == expected_message_count
+            assert len(history) == expected_message_count
             assert len(customers) == 1
             assert customers[0].phone_e164 == expected_phone
+            assert "customer_phone" not in booking_context
+            assert "pending_contact_phone_encrypted" not in booking_context
+            assert decrypt_telegram_secret(
+                booking_context["customer_phone_encrypted"]
+            ) == expected_phone
+            assert booking_context["contact_onboarding_complete"] is True
+            if phone_input != "__contact__":
+                assert customers[0].name == "Existing Customer"
+            reply_markups = [item.reply_markup for item in outbound if item.reply_markup]
+            assert any(
+                button.get("request_contact") is True
+                for markup in reply_markups
+                for row in markup.get("keyboard", [])
+                for button in row
+            )
+            assert any(
+                button.get("text") == "Yes, use this number"
+                for markup in reply_markups
+                for row in markup.get("keyboard", [])
+                for button in row
+            )
+            history_texts = [
+                decrypt_telegram_secret(item.body_encrypted) for item in history
+            ]
+            assert any(
+                expected_phone in message
+                and "would you like to use this number" in message.casefold()
+                for message in history_texts
+            )
+            if phone_input != "__contact__":
+                assert any(
+                    "not verified" in message.casefold()
+                    for message in history_texts
+                )
             assert len(notifications) == 1
             assert notifications[0].status == "queued"
             assert len(alert_jobs) == 1
@@ -438,15 +611,15 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
 
                 new_day = datetime.now(ZoneInfo("Africa/Lagos")).date() + timedelta(days=3)
                 management_steps = (
-                    (8, "/appointments"),
-                    (9, "/reschedule"),
-                    (10, "1"),
-                    (11, new_day.isoformat()),
-                    (12, "1"),
-                    (13, "YES"),
-                    (14, "/cancel"),
+                    (11, "/appointments"),
+                    (12, "/reschedule"),
+                    (13, "1"),
+                    (14, new_day.isoformat()),
                     (15, "1"),
                     (16, "YES"),
+                    (17, "/cancel"),
+                    (18, "1"),
+                    (19, "YES"),
                 )
                 for sequence, customer_text in management_steps:
                     update_id = send_customer_message(customer_text, sequence)
@@ -483,6 +656,50 @@ def test_telegram_booking_journey_and_cross_channel_conflict(
                 assert "appointment.created" in lifecycle_events
                 assert "appointment.rescheduled.customer" in lifecycle_events
                 assert "appointment.cancelled.customer" in lifecycle_events
+            else:
+                async def verify_alternative_phone_is_unverified():
+                    async with AsyncSessionFactory() as session:
+                        identity_result = await session.execute(
+                            select(TelegramCustomerIdentity).where(
+                                TelegramCustomerIdentity.tenant_id == tenant_id,
+                                TelegramCustomerIdentity.telegram_user_id == str(user_id),
+                            )
+                        )
+                        return identity_result.scalar_one_or_none()
+
+                assert asyncio.run(verify_alternative_phone_is_unverified()) is None
+
+                for sequence, command in (
+                    (11, "/appointments"),
+                    (12, "/cancel"),
+                    (13, "/reschedule"),
+                ):
+                    update_id = send_customer_message(command, sequence)
+                    asyncio.run(process_inbound(update_id, sequence))
+
+                async def inspect_unverified_management_replies():
+                    async with AsyncSessionFactory() as session:
+                        result = await session.execute(
+                            select(TelegramConversationMessage).where(
+                                TelegramConversationMessage.tenant_id == tenant_id,
+                                TelegramConversationMessage.direction == "outbound",
+                            ).order_by(TelegramConversationMessage.created_at.desc()).limit(3)
+                        )
+                        return [
+                            decrypt_telegram_secret(item.body_encrypted)
+                            for item in result.scalars().all()
+                        ]
+
+                management_replies = asyncio.run(
+                    inspect_unverified_management_replies()
+                )
+                assert len(management_replies) == 3
+                assert all(
+                    "verify your identity" in reply.casefold()
+                    or "verify your identity using" in reply.casefold()
+                    for reply in management_replies
+                )
+                assert all("Haircut" not in reply for reply in management_replies)
 
     finally:
         if tenant_id is not None:
