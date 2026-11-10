@@ -162,7 +162,9 @@ async def test_per_chat_commands_override_conflicting_global_configuration(monke
 
 
 @pytest.mark.asyncio
-async def test_per_chat_commands_are_cached_only_after_successful_verification(monkeypatch):
+async def test_per_chat_commands_are_cached_only_after_successful_verification(
+    monkeypatch,
+):
     FakeClient.requests = []
     FakeClient.responses = [
         FakeResponse(True),
@@ -191,7 +193,10 @@ async def test_per_chat_menu_mismatch_is_rejected(monkeypatch):
     ]
     monkeypatch.setattr(telegram_bot.httpx, "AsyncClient", FakeClient)
 
-    with pytest.raises(telegram_bot.TelegramAPIError, match="menu for this private chat"):
+    with pytest.raises(
+        telegram_bot.TelegramAPIError,
+        match="menu for this private chat",
+    ):
         await telegram_bot.ensure_private_chat_commands(
             bot_token="123456:fake-test-token",
             bot_id="9016622451",
