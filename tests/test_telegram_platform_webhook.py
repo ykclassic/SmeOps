@@ -196,3 +196,78 @@ def test_platform_webhook_never_returns_200_when_persistence_fails(
 
     assert response.status_code == 500
     assert not session.committed
+
+
+@pytest.mark.parametrize(
+    ("payload", "extra_results"),
+    [
+        ({"update_id": 201, "callback_query": {"id": "opaque"}}, ()),
+        (
+            {
+                **_message_update(update_id=202),
+                "message": {
+                    "chat": {"id": -10, "type": "group"},
+                    "from": {"id": 555, "is_bot": False},
+                },
+            },
+            (),
+        ),
+        (
+            {
+                **_message_update(update_id=203),
+                "message": {
+                    "chat": {"id": 555, "type": "private"},
+                    "from": {"id": 555, "is_bot": True},
+                },
+            },
+            (),
+        ),
+        (
+            {
+                **_message_update(update_id=204),
+                "message": {
+                    "chat": {"id": 555, "type": "private"},
+                    "from": {"id": 556, "is_bot": False},
+                },
+            },
+            (),
+        ),
+        (_message_update(update_id=205, text="/start"), ()),
+        (_message_update(update_id=206), (None,)),
+    ],
+)
+def test_platform_webhook_acknowledges_unroutable_updates_as_ignored(
+    payload,
+    extra_results,
+):
+    # First query loads the platform bot; the next checks the event de-duplication
+    # record. A third result is needed only when resolving an existing chat context.
+    results = [_platform_bot(), None, *extra_results]
+    session = FakePlatformSession(*results)
+    with _client(session) as client:
+        response = _post(client, payload)
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "queued_events": 0}
+    assert session.events == []
+    assert not session.committed
+
+
+def test_platform_webhook_rejects_invalid_json():
+    session = FakePlatformSession(_platform_bot())
+    async def override_session():
+        yield session
+
+    app.dependency_overrides[get_db_session] = override_session
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "correct-secret"},
+            content=b"{not-json",
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert session.events == []
+    assert not session.committed
