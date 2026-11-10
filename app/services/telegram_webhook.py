@@ -17,8 +17,9 @@ from app.integrations.telegram_bot import (
     get_webhook_info,
     register_webhook,
     set_bot_commands,
+    ensure_private_chat_commands,
 )
-from app.models import TelegramPlatformBot
+from app.models import TelegramConversation, TelegramPlatformBot, TelegramOwnerLink
 
 logger = logging.getLogger(__name__)
 EXPECTED_PLATFORM_BOT_ID = "9016622451"
@@ -106,7 +107,37 @@ async def reconcile_platform_webhook_on_startup() -> None:
                 )
                 return
             await ensure_platform_webhook(platform_bot)
-            await session.commit()
+            token = decrypt_telegram_secret(platform_bot.bot_token_encrypted)
+            conversation_chats = await session.execute(
+                select(TelegramConversation.telegram_chat_id)
+                .where(TelegramConversation.tenant_id.is_not(None))
+                .distinct()
+            )
+            owner_chats = await session.execute(
+                select(TelegramOwnerLink.chat_id).where(
+                    TelegramOwnerLink.chat_id.is_not(None),
+                    TelegramOwnerLink.linked_at.is_not(None),
+                    TelegramOwnerLink.disabled_at.is_(None),
+                ).distinct()
+            )
+            chat_ids = {
+                str(value)
+                for value in conversation_chats.scalars().all()
+                if value is not None
+            }
+            chat_ids.update(
+                str(value)
+                for value in owner_chats.scalars().all()
+                if value is not None
+            )
+            for chat_id in sorted(chat_ids):
+                await ensure_private_chat_commands(
+                    bot_token=token,
+                    bot_id=platform_bot.bot_id,
+                    chat_id=chat_id,
+                    force=True,
+                )
+            session.commit()
     except (TelegramAPIError, TelegramDeliveryUnknown, RuntimeError, ValueError):
         logger.exception("Shared Telegram webhook reconciliation failed")
     except Exception:
