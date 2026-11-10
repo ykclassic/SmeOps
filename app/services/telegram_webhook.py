@@ -19,7 +19,11 @@ from app.integrations.telegram_bot import (
     set_bot_commands,
     ensure_private_chat_commands,
 )
-from app.models import TelegramConversation, TelegramPlatformBot, TelegramOwnerLink
+from app.models import (
+    TelegramConversation,
+    TelegramOwnerLink,
+    TelegramPlatformBot,
+)
 
 logger = logging.getLogger(__name__)
 EXPECTED_PLATFORM_BOT_ID = "9016622451"
