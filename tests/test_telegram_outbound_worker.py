@@ -92,7 +92,7 @@ async def test_outbound_worker_sends_and_updates_durable_ledger(monkeypatch):
         )
     )
 
-    assert sent == [("bot-token", "-100123456789", "Hello")]
+    assert sent == [("bot-token", "-100123456789", "Hello", None)]
     assert message.status == "sent"
     assert message.provider_message_id == "-100123456789:456"
     assert history.provider_message_id == "-100123456789:456"
