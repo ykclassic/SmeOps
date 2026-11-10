@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.core.whatsapp import decrypt_whatsapp_secret
+from app.integrations.telegram_bot import contact_request_keyboard, remove_reply_keyboard
 from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
     classify_inbound_intent,
@@ -34,7 +35,6 @@ from app.services.salon_booking import (
     parse_booking_date,
 )
 from app.services.telegram_outbound import enqueue_telegram_text
-from app.integrations.telegram_bot import contact_request_keyboard, remove_reply_keyboard
 from app.services.telegram_owner_notifications import enqueue_appointment_owner_alerts
 from app.services.whatsapp_outbound import (
     OutboundPolicyViolation,
@@ -379,6 +379,7 @@ async def process_channel_conversation_job(
                             f"Your contact is verified for {tenant.name}. "
                             "Use the Telegram menu button to view or manage your appointments."
                         )
+                        reply_markup = remove_reply_keyboard()
             elif channel == "telegram" and normalized in {"/help", "help"}:
                 reply = (
                     "SmeOps appointment menu:\n"
@@ -400,7 +401,10 @@ async def process_channel_conversation_job(
                 )
                 identity = identity_result.scalar_one_or_none()
                 if identity is None:
-                    reply = "To view your appointments, verify your identity using the Share My Contact button below."
+                    reply = (
+                        "To view your appointments, verify your identity using "
+                        "the Share My Contact button below."
+                    )
                     reply_markup = contact_request_keyboard()
                 else:
                     appointments_result = await session.execute(
@@ -443,7 +447,9 @@ async def process_channel_conversation_job(
                 )
                 identity = identity_result.scalar_one_or_none()
                 if identity is None:
-                    reply = "Verify your identity using the Share My Contact button below."
+                    reply = (
+                        "Verify your identity using the Share My Contact button below."
+                    )
                     reply_markup = contact_request_keyboard()
                 else:
                     rows_result = await session.execute(
