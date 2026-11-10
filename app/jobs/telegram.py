@@ -58,13 +58,21 @@ async def _persist_telegram_message(
     contact = message.get("contact")
     verified_contact_phone = None
     verified_contact_user_id = None
-    if (
-        isinstance(contact, dict)
-        and contact.get("user_id") == user_id
-        and isinstance(contact.get("phone_number"), str)
-    ):
-        verified_contact_phone = contact["phone_number"]
-        verified_contact_user_id = str(user_id)
+    if isinstance(contact, dict):
+        contact_user_id = contact.get("user_id")
+        if (
+            isinstance(contact_user_id, int)
+            and not isinstance(contact_user_id, bool)
+            and contact_user_id == user_id
+            and isinstance(contact.get("phone_number"), str)
+            and 0 < len(contact["phone_number"].strip()) <= 64
+        ):
+            verified_contact_phone = contact["phone_number"].strip()
+            verified_contact_user_id = str(user_id)
+        else:
+            # Preserve a non-sensitive rejection marker so the conversation can
+            # explain that only the sender's own Telegram contact is accepted.
+            text_body = "[Telegram contact not verified]"
     if isinstance(text_body, str) and len(text_body) > 4096:
         text_body = None
     if not isinstance(text_body, str):

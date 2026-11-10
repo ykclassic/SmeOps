@@ -18,6 +18,7 @@ from app.models import (
     Appointment,
     BackgroundJob,
     Tenant,
+    WhatsAppConversation,
     WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
 )
@@ -171,7 +172,28 @@ def test_complete_salon_booking_conversation(monkeypatch):
                 )
                 await process_whatsapp_conversation_job(conversation_job)
 
-            for customer_text in ("BOOK", "1", "Ada Lovelace", "tomorrow", "1", "YES"):
+            for customer_text in ("BOOK", "1", "Ada Lovelace"):
+                provider_id = send_customer_message(customer_text)
+                asyncio.run(process_inbound(provider_id))
+
+            async def seed_legacy_phone_step():
+                async with AsyncSessionFactory() as session:
+                    result = await session.execute(
+                        select(WhatsAppConversation).where(
+                            WhatsAppConversation.tenant_id == tenant_id
+                        )
+                    )
+                    conversation = result.scalar_one()
+                    context = dict(conversation.context or {})
+                    booking = dict(context.get("booking") or {})
+                    booking["step"] = "awaiting_phone"
+                    context["booking"] = booking
+                    conversation.context = context
+                    await session.commit()
+
+            asyncio.run(seed_legacy_phone_step())
+
+            for customer_text in (phone, "tomorrow", "1", "YES"):
                 provider_id = send_customer_message(customer_text)
                 asyncio.run(process_inbound(provider_id))
 
@@ -199,8 +221,8 @@ def test_complete_salon_booking_conversation(monkeypatch):
             appointments, outbound, history = asyncio.run(inspect_results())
             assert len(appointments) == 1
             assert appointments[0].status == "confirmed"
-            assert len(outbound) == 6
-            assert len(history) == 6
+            assert len(outbound) == 7
+            assert len(history) == 7
             assert any(
                 "appointment is confirmed"
                 in decrypt_whatsapp_secret(item.body_encrypted).casefold()
@@ -215,7 +237,7 @@ def test_complete_salon_booking_conversation(monkeypatch):
                 headers=auth,
             )
             assert messages.status_code == 200
-            assert len(messages.json()) == 12
+            assert len(messages.json()) == 14
 
     finally:
         if tenant_id is not None:

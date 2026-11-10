@@ -17,7 +17,7 @@ The repository contains a multi-tenant booking backend, an owner dashboard, What
 - WhatsApp webhook signature verification, encrypted event persistence, deduplication and durable background jobs.
 - Encrypted customer phone numbers and message bodies, conversation history, opt-out state and 24-hour customer-service-window enforcement.
 - Durable outbound message ledger with safe retry behavior and Meta delivery-status reconciliation.
-- Deterministic salon booking conversation: service selection, customer name, date, availability options, explicit customer confirmation and appointment creation.
+- Deterministic salon booking conversation: service selection, customer name, explicit Telegram self-contact sharing and Yes/No confirmation, date, availability options, explicit booking confirmation and appointment creation. Alternative phone numbers remain unverified.
 - Shared SmeOps Telegram platform bot (`@smeops_bot`) for tenant-specific customer booking links and private owner linking; owners do not provision bots or manage bot tokens.
 - Telegram webhook update deduplication, tenant-bound customer chat context, separate owner/customer deep-link namespaces and durable owner appointment-alert delivery.
 - Telegram startup webhook reconciliation with bot identity verification, `getWebhookInfo` inspection and idempotent webhook registration.
@@ -45,9 +45,11 @@ The WhatsApp customer journey is:
 
 The Telegram customer journey is:
 
-`Tenant booking deep link → @smeops_bot private chat → shared Telegram webhook → globally deduplicated update → tenant-bound chat context → shared deterministic conversation engine → transactional booking → persisted appointment → durable Telegram outbound queue → customer confirmation and linked-owner alert`
+`Tenant booking deep link → @smeops_bot private chat → service and name selection → Share My Contact → display shared phone → explicit Yes/No decision → verified tenant customer identity (or unverified alternative number) → date and slot selection → transactional booking → persisted appointment → durable Telegram outbound queue → customer confirmation and linked-owner alert`
 
 The model has no database credentials and no direct tool execution. Every booking write requires server-side validation and explicit customer confirmation.
+
+Telegram booking always requests the customer's own Telegram contact, even if the conversation contains a previously stored phone number. The bot displays the shared number and asks whether to use it. Confirmed self-shared contacts are matched or created within the current tenant and establish a verified Telegram identity. If the customer declines, an alternative number can be used for that booking but remains unverified; it does not grant access to appointment history, cancellation or rescheduling. SMS/OTP verification for alternative numbers is deferred.
 
 ## Local development
 
