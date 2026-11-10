@@ -360,7 +360,7 @@ async def receive_platform_telegram_webhook(
             **update_context,
             "outcome": "enqueued",
             "event_id": str(event.id),
-            "job_id": str(job.id),
+            "job_id": str(job.id) if getattr(job, "id", None) is not None else None,
             "job_type": "telegram.accept_inbound",
         },
     )
