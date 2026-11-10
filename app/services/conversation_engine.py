@@ -250,6 +250,7 @@ async def process_channel_conversation_job(
             return
 
         context = dict(conversation.context or {})
+        reply_markup = None
         previous_processed = context.get("last_processed_at")
         if previous_processed:
             try:
