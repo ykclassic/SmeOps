@@ -258,8 +258,6 @@ async def process_channel_conversation_job(
             platform_bot = platform_result.scalar_one_or_none()
             if platform_bot is None:
                 raise RuntimeError("Active SmeOps Telegram platform bot is unavailable")
-            from app.core.telegram import decrypt_telegram_secret
-
             await ensure_private_chat_commands(
                 bot_token=decrypt_telegram_secret(platform_bot.bot_token_encrypted),
                 bot_id=platform_bot.bot_id,
