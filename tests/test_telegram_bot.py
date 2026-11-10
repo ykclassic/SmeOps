@@ -157,3 +157,23 @@ async def test_register_webhook_rejects_non_https_url(monkeypatch):
             webhook_url="http://api.example.com/webhook",
             secret_token="secure_webhook_secret_123",
         )
+
+
+@pytest.mark.asyncio
+async def test_send_text_includes_reply_keyboard_when_requested(monkeypatch):
+    FakeAsyncClient.responses = [FakeResponse({"ok": True, "result": {"message_id": 456}})]
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    keyboard = {
+        "keyboard": [[{"text": "Share My Contact", "request_contact": True}]],
+        "resize_keyboard": True,
+    }
+
+    await send_text_message(
+        bot_token="123456:valid-test-token",
+        chat_id="987654321",
+        body="Verify your identity.",
+        reply_markup=keyboard,
+    )
+
+    assert FakeAsyncClient.requests[0]["json"]["reply_markup"] == keyboard

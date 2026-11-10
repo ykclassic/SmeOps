@@ -153,21 +153,55 @@ async def remove_webhook(*, bot_token: str) -> None:
     )
 
 
+async def set_bot_commands(*, bot_token: str) -> None:
+    commands = [
+        {"command": "book", "description": "Book an appointment"},
+        {"command": "appointments", "description": "View your appointments"},
+        {"command": "cancel", "description": "Cancel an appointment"},
+        {"command": "reschedule", "description": "Change an appointment time"},
+        {"command": "help", "description": "Show help and options"},
+    ]
+    await _call_bot_api(
+        bot_token=bot_token,
+        method="setMyCommands",
+        payload={"commands": commands},
+    )
+
+
+def contact_request_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": "Share My Contact", "request_contact": True}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": True,
+        "input_field_placeholder": "Tap Share My Contact",
+    }
+
+
+def remove_reply_keyboard() -> dict[str, bool]:
+    return {"remove_keyboard": True}
+
+
 async def send_text_message(
     *,
     bot_token: str,
     chat_id: str,
     body: str,
+    reply_markup: dict[str, Any] | None = None,
 ) -> TelegramSendResult:
     if not chat_id or len(chat_id) > 80:
         raise ValueError("Invalid Telegram chat identifier")
     if not body or len(body) > 4096:
         raise ValueError("Telegram text must contain 1 to 4096 characters")
     try:
+        payload = {"chat_id": chat_id, "text": body}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         result = await _call_bot_api(
             bot_token=bot_token,
             method="sendMessage",
-            payload={"chat_id": chat_id, "text": body},
+            payload=payload,
         )
     except TelegramAPIError as exc:
         raise TelegramSendRejected("Telegram rejected the message request") from exc

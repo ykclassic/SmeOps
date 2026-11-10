@@ -16,6 +16,7 @@ from app.integrations.telegram_bot import (
     get_bot_identity,
     get_webhook_info,
     register_webhook,
+    set_bot_commands,
 )
 from app.models import TelegramPlatformBot
 
@@ -74,8 +75,10 @@ async def ensure_platform_webhook(platform_bot: TelegramPlatformBot) -> None:
         if info.url != webhook_url:
             raise RuntimeError("Telegram did not confirm the shared webhook URL")
 
+    await set_bot_commands(bot_token=token)
+
     logger.info(
-        "Shared Telegram webhook reconciled",
+        "Shared Telegram webhook and command menu reconciled",
         extra={
             "bot_id": platform_bot.bot_id,
             "webhook_url": info.url,

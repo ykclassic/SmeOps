@@ -177,6 +177,7 @@ class TelegramOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     recipient_chat_id: Mapped[str] = mapped_column(String(80), nullable=False)
     body_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    reply_markup: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[Literal["queued", "sending", "sent", "failed", "unknown"]] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")

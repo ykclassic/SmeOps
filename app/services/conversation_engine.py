@@ -13,6 +13,7 @@ from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
     classify_inbound_intent,
 )
+from app.integrations.telegram_bot import contact_request_keyboard, remove_reply_keyboard
 from app.jobs.queue import ClaimedJob
 from app.models import (
     Appointment,
@@ -167,6 +168,7 @@ async def _send_reply(
     customer_phone: str | None,
     inbound_message_id: UUID,
     body: str,
+    reply_markup: dict | None = None,
 ) -> None:
     if channel == "telegram":
         await enqueue_telegram_text(
@@ -175,6 +177,7 @@ async def _send_reply(
             conversation_id=conversation_id,
             body=body,
             idempotency_key=f"conversation-reply:{inbound_message_id}",
+            reply_markup=reply_markup,
         )
         return
     if customer_phone is None:
@@ -247,6 +250,7 @@ async def process_channel_conversation_job(
             return
 
         context = dict(conversation.context or {})
+        reply_markup = None
         previous_processed = context.get("last_processed_at")
         if previous_processed:
             try:
@@ -373,9 +377,9 @@ async def process_channel_conversation_job(
                     else:
                         reply = (
                             f"Your contact is verified for {tenant.name}. "
-                            "Send /appointments to view your upcoming appointments, "
-                            "/cancel to cancel one, or /reschedule to change its time."
+                            "Use the Telegram menu button to view or manage your appointments."
                         )
+                        reply_markup = remove_reply_keyboard()
             elif channel == "telegram" and normalized in {"/help", "help"}:
                 reply = (
                     "SmeOps appointment menu:\n"
@@ -398,10 +402,10 @@ async def process_channel_conversation_job(
                 identity = identity_result.scalar_one_or_none()
                 if identity is None:
                     reply = (
-                        "To view your appointments, share your own Telegram contact first. "
-                        "Tap the attachment icon in Telegram, choose Contact, "
-                        "then select Share My Contact."
+                        "To view your appointments, verify your identity using "
+                        "the Share My Contact button below."
                     )
+                    reply_markup = contact_request_keyboard()
                 else:
                     appointments_result = await session.execute(
                         select(Appointment, Service).join(
@@ -444,10 +448,9 @@ async def process_channel_conversation_job(
                 identity = identity_result.scalar_one_or_none()
                 if identity is None:
                     reply = (
-                        "Share your own Telegram contact first to manage appointments. "
-                        "In Telegram, tap the attachment icon, choose Contact, "
-                        "then select Share My Contact."
+                        "Verify your identity using the Share My Contact button below."
                     )
+                    reply_markup = contact_request_keyboard()
                 else:
                     rows_result = await session.execute(
                         select(Appointment, Service).join(
@@ -1041,6 +1044,7 @@ async def process_channel_conversation_job(
                 customer_phone=customer_phone,
                 inbound_message_id=inbound.id,
                 body=reply,
+                reply_markup=reply_markup if channel == "telegram" else None,
             )
             await session.commit()
         except OutboundPolicyViolation:
