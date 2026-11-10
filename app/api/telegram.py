@@ -173,7 +173,11 @@ async def receive_platform_telegram_webhook(
     ):
         logger.info(
             "Telegram platform webhook ignored",
-            extra={**update_context, "outcome": "ignored", "reason": "invalid_private_chat_identity"},
+            extra={
+                **update_context,
+                "outcome": "ignored",
+                "reason": "invalid_private_chat_identity",
+            },
         )
         return {"status": "ignored", "queued_events": 0}
 
