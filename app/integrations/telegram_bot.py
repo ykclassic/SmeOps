@@ -45,7 +45,7 @@ async def _call_bot_api(
     bot_token: str,
     method: str,
     payload: dict[str, Any],
-) -> dict[str, Any]:
+) -> Any:
     _validate_token(bot_token)
     url = f"https://api.telegram.org/bot{bot_token}/{method}"
     timeout = httpx.Timeout(20.0, connect=5.0)
@@ -67,7 +67,7 @@ async def _call_bot_api(
     if not isinstance(data, dict) or data.get("ok") is not True:
         raise TelegramAPIError("Telegram API request was rejected")
     result = data.get("result")
-    if isinstance(result, dict):
+    if isinstance(result, (dict, list)):
         return result
     if result is True:
         return {}
@@ -153,19 +153,46 @@ async def remove_webhook(*, bot_token: str) -> None:
     )
 
 
+TELEGRAM_CUSTOMER_COMMANDS = [
+    {"command": "book", "description": "Book an appointment"},
+    {"command": "appointments", "description": "View your appointments"},
+    {"command": "cancel", "description": "Cancel an appointment"},
+    {"command": "reschedule", "description": "Change an appointment time"},
+    {"command": "help", "description": "Show help and options"},
+]
+TELEGRAM_PRIVATE_COMMAND_SCOPE = {"type": "all_private_chats"}
+TELEGRAM_COMMANDS_MENU_BUTTON = {"type": "commands"}
+
+
 async def set_bot_commands(*, bot_token: str) -> None:
-    commands = [
-        {"command": "book", "description": "Book an appointment"},
-        {"command": "appointments", "description": "View your appointments"},
-        {"command": "cancel", "description": "Cancel an appointment"},
-        {"command": "reschedule", "description": "Change an appointment time"},
-        {"command": "help", "description": "Show help and options"},
-    ]
+    """Configure and verify the command list and menu button for private chats."""
+    scope = TELEGRAM_PRIVATE_COMMAND_SCOPE
     await _call_bot_api(
         bot_token=bot_token,
         method="setMyCommands",
-        payload={"commands": commands},
+        payload={"commands": TELEGRAM_CUSTOMER_COMMANDS, "scope": scope},
     )
+    await _call_bot_api(
+        bot_token=bot_token,
+        method="setChatMenuButton",
+        payload={"menu_button": TELEGRAM_COMMANDS_MENU_BUTTON},
+    )
+    registered = await _call_bot_api(
+        bot_token=bot_token,
+        method="getMyCommands",
+        payload={"scope": scope},
+    )
+    if registered != TELEGRAM_CUSTOMER_COMMANDS:
+        raise TelegramAPIError(
+            "Telegram did not confirm the expected private-chat command list"
+        )
+    menu_button = await _call_bot_api(
+        bot_token=bot_token,
+        method="getChatMenuButton",
+        payload={},
+    )
+    if menu_button.get("type") != "commands":
+        raise TelegramAPIError("Telegram did not confirm the commands menu button")
 
 
 def contact_request_keyboard() -> dict[str, Any]:
