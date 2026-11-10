@@ -78,35 +78,76 @@ async def receive_platform_telegram_webhook(
     )
     platform_bot = platform_result.scalar_one_or_none()
     if platform_bot is None:
+        logger.warning(
+            "Telegram platform webhook rejected",
+            extra={"outcome": "rejected", "reason": "platform_bot_unavailable"},
+        )
         raise HTTPException(status_code=404, detail="Platform Telegram bot is not configured")
-    if not verify_telegram_webhook_secret(secret_token or "", platform_bot.webhook_secret_hash):
+    if not verify_telegram_webhook_secret(
+        secret_token or "",
+        platform_bot.webhook_secret_hash,
+    ):
+        logger.warning(
+            "Telegram platform webhook rejected",
+            extra={"outcome": "rejected", "reason": "invalid_secret"},
+        )
         raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
 
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
             if int(content_length) > MAX_TELEGRAM_WEBHOOK_BYTES:
+                logger.warning(
+                    "Telegram platform webhook rejected",
+                    extra={"outcome": "rejected", "reason": "payload_too_large"},
+                )
                 raise HTTPException(status_code=413, detail="Webhook too large")
         except ValueError:
+            logger.warning(
+                "Telegram platform webhook rejected",
+                extra={"outcome": "rejected", "reason": "invalid_content_length"},
+            )
             raise HTTPException(status_code=400, detail="Invalid content length") from None
+
     body_buffer = bytearray()
     async for chunk in request.stream():
         body_buffer.extend(chunk)
         if len(body_buffer) > MAX_TELEGRAM_WEBHOOK_BYTES:
+            logger.warning(
+                "Telegram platform webhook rejected",
+                extra={"outcome": "rejected", "reason": "payload_too_large"},
+            )
             raise HTTPException(status_code=413, detail="Webhook too large")
     try:
         payload = json.loads(bytes(body_buffer))
     except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning(
+            "Telegram platform webhook rejected",
+            extra={"outcome": "rejected", "reason": "invalid_json"},
+        )
         raise HTTPException(status_code=400, detail="Invalid JSON payload") from None
     if not isinstance(payload, dict):
+        logger.warning(
+            "Telegram platform webhook rejected",
+            extra={"outcome": "rejected", "reason": "unsupported_payload_shape"},
+        )
         raise HTTPException(status_code=400, detail="Unsupported Telegram update")
     update_id = payload.get("update_id")
     if isinstance(update_id, bool) or not isinstance(update_id, int) or update_id < 0:
+        logger.warning(
+            "Telegram platform webhook rejected",
+            extra={"outcome": "rejected", "reason": "invalid_update_id"},
+        )
         raise HTTPException(status_code=400, detail="Telegram update ID is invalid")
 
+    update_context = {"update_id": update_id, "bot_id": platform_bot.bot_id}
     message = payload.get("message")
     if not isinstance(message, dict):
-        return {"status": "accepted", "queued_events": 0}
+        logger.info(
+            "Telegram platform webhook ignored",
+            extra={**update_context, "outcome": "ignored", "reason": "unsupported_update_type"},
+        )
+        return {"status": "ignored", "queued_events": 0}
     chat = message.get("chat")
     sender = message.get("from")
     if (
@@ -115,7 +156,11 @@ async def receive_platform_telegram_webhook(
         or not isinstance(sender, dict)
         or sender.get("is_bot") is True
     ):
-        return {"status": "accepted", "queued_events": 0}
+        logger.info(
+            "Telegram platform webhook ignored",
+            extra={**update_context, "outcome": "ignored", "reason": "unsupported_chat_or_sender"},
+        )
+        return {"status": "ignored", "queued_events": 0}
     chat_id, sender_id = chat.get("id"), sender.get("id")
     if (
         isinstance(chat_id, bool)
@@ -126,7 +171,15 @@ async def receive_platform_telegram_webhook(
         or sender_id <= 0
         or chat_id != sender_id
     ):
-        return {"status": "accepted", "queued_events": 0}
+        logger.info(
+            "Telegram platform webhook ignored",
+            extra={
+                **update_context,
+                "outcome": "ignored",
+                "reason": "invalid_private_chat_identity",
+            },
+        )
+        return {"status": "ignored", "queued_events": 0}
 
     canonical_payload = json.dumps(
         payload,
@@ -144,16 +197,23 @@ async def receive_platform_telegram_webhook(
     )
     duplicate = duplicate_result.scalar_one_or_none()
     if duplicate is not None:
-        if duplicate.payload_sha256 != payload_hash:
-            logger.warning("Telegram platform duplicate update payload hash mismatch")
-        return {"status": "accepted", "queued_events": 0}
+        logger.info(
+            "Telegram platform webhook duplicate",
+            extra={
+                **update_context,
+                "outcome": "duplicate",
+                "event_id": str(duplicate.id),
+                "payload_hash_matches": duplicate.payload_sha256 == payload_hash,
+            },
+        )
+        return {"status": "duplicate", "queued_events": 0}
 
     tenant_id = None
     text_body = message.get("text")
-    token = ""
     is_start_command = isinstance(text_body, str) and (
         text_body == "/start" or text_body.startswith("/start ")
     )
+    token = ""
     if is_start_command:
         parts = text_body.split(maxsplit=1)
         token = parts[1].strip() if len(parts) == 2 else ""
@@ -200,8 +260,11 @@ async def receive_platform_telegram_webhook(
                     chat_context.selected_at = datetime.now(UTC)
                 session.add(chat_context)
     if is_start_command and tenant_id is None:
-        # Invalid, expired, revoked or missing deep-link tokens never inherit an old chat context.
-        return {"status": "accepted", "queued_events": 0}
+        logger.info(
+            "Telegram platform webhook ignored",
+            extra={**update_context, "outcome": "ignored", "reason": "unresolved_start_link"},
+        )
+        return {"status": "ignored", "queued_events": 0}
     if tenant_id is None:
         context_result = await session.execute(
             select(TelegramChatContext).where(
@@ -213,8 +276,11 @@ async def receive_platform_telegram_webhook(
         chat_context = context_result.scalar_one_or_none()
         tenant_id = chat_context.tenant_id if chat_context is not None else None
     if tenant_id is None:
-        # No default tenant is ever selected. The user must open a valid business link.
-        return {"status": "accepted", "queued_events": 0}
+        logger.info(
+            "Telegram platform webhook ignored",
+            extra={**update_context, "outcome": "ignored", "reason": "no_tenant_context"},
+        )
+        return {"status": "ignored", "queued_events": 0}
 
     event = TelegramWebhookEvent(
         id=uuid4(),
@@ -231,16 +297,73 @@ async def receive_platform_telegram_webhook(
             session.add(event)
             await session.flush()
     except IntegrityError:
-        return {"status": "accepted", "queued_events": 0}
-    await enqueue_job(
-        session,
-        tenant_id=tenant_id,
-        job_type="telegram.accept_inbound",
-        payload={"webhook_event_id": str(event.id)},
-        idempotency_key=f"tg:platform:{platform_bot.bot_id}:{provider_update_id}",
-        max_attempts=3,
+        # A concurrent request may have inserted the same update after the first
+        # duplicate lookup. Only acknowledge it as a duplicate after verifying
+        # the durable row; otherwise propagate the database failure.
+        duplicate_result = await session.execute(
+            select(TelegramWebhookEvent).where(
+                TelegramWebhookEvent.bot_id == platform_bot.bot_id,
+                TelegramWebhookEvent.provider_update_id == provider_update_id,
+            )
+        )
+        duplicate = duplicate_result.scalar_one_or_none()
+        if duplicate is None or duplicate.payload_sha256 != payload_hash:
+            raise
+        logger.info(
+            "Telegram platform webhook duplicate",
+            extra={
+                **update_context,
+                "outcome": "duplicate",
+                "event_id": str(duplicate.id),
+                "payload_hash_matches": True,
+                "race_recovered": True,
+            },
+        )
+        return {"status": "duplicate", "queued_events": 0}
+
+    try:
+        job = await enqueue_job(
+            session,
+            tenant_id=tenant_id,
+            job_type="telegram.accept_inbound",
+            payload={"webhook_event_id": str(event.id)},
+            idempotency_key=f"tg:platform:{platform_bot.bot_id}:{provider_update_id}",
+            max_attempts=3,
+        )
+        await session.commit()
+    except Exception as exc:
+        # Do not return a successful Telegram acknowledgement unless the event
+        # and its job have committed in the same database transaction.
+        logger.error(
+            "Telegram platform webhook persistence failed",
+            extra={
+                **update_context,
+                "outcome": "rejected",
+                "reason": "persistence_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise
+
+    logger.info(
+        "Telegram platform webhook accepted",
+        extra={
+            **update_context,
+            "outcome": "accepted",
+            "event_id": str(event.id),
+            "tenant_id": str(tenant_id),
+        },
     )
-    await session.commit()
+    logger.info(
+        "Telegram platform webhook job enqueued",
+        extra={
+            **update_context,
+            "outcome": "enqueued",
+            "event_id": str(event.id),
+            "job_id": str(job.id) if getattr(job, "id", None) is not None else None,
+            "job_type": "telegram.accept_inbound",
+        },
+    )
     return {"status": "accepted", "queued_events": 1}
 
 @router.post("/webhooks/telegram/{bot_id}", status_code=status.HTTP_200_OK)
