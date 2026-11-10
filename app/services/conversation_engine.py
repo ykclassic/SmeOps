@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram import decrypt_telegram_secret, encrypt_telegram_secret
 from app.core.whatsapp import decrypt_whatsapp_secret
-from app.integrations.telegram_bot import contact_request_keyboard, remove_reply_keyboard
 from app.integrations.conversation_ai import (
     ConversationAIUnavailable,
     classify_inbound_intent,
 )
+from app.integrations.telegram_bot import contact_request_keyboard, remove_reply_keyboard
 from app.jobs.queue import ClaimedJob
 from app.models import (
     Appointment,
