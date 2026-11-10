@@ -27,11 +27,12 @@ class FakeNested:
 
 
 class FakePlatformSession:
-    def __init__(self, *results, commit_error=None):
+    def __init__(self, *results, commit_error=None, flush_error=None):
         self.results = list(results)
         self.events = []
         self.committed = False
         self.commit_error = commit_error
+        self.flush_error = flush_error
 
     async def execute(self, _statement):
         value = self.results.pop(0) if self.results else None
@@ -44,7 +45,8 @@ class FakePlatformSession:
         self.events.append(value)
 
     async def flush(self):
-        return None
+        if self.flush_error:
+            raise self.flush_error
 
     async def commit(self):
         if self.commit_error:
@@ -270,4 +272,74 @@ def test_platform_webhook_rejects_invalid_json():
 
     assert response.status_code == 400
     assert session.events == []
+    assert not session.committed
+
+
+
+def test_platform_webhook_rejects_when_platform_bot_is_not_configured():
+    session = FakePlatformSession(None)
+    with _client(session) as client:
+        response = _post(client, _message_update())
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert session.events == []
+    assert not session.committed
+
+
+def test_platform_webhook_rejects_non_object_json_payload():
+    session = FakePlatformSession(_platform_bot())
+    async def override_session():
+        yield session
+
+    app.dependency_overrides[get_db_session] = override_session
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "correct-secret"},
+            content=b'["not", "an", "update"]',
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert session.events == []
+    assert not session.committed
+
+
+def test_platform_webhook_rejects_oversized_payload():
+    session = FakePlatformSession(_platform_bot())
+    async def override_session():
+        yield session
+
+    app.dependency_overrides[get_db_session] = override_session
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "correct-secret"},
+            content=b"x" * (telegram_api.MAX_TELEGRAM_WEBHOOK_BYTES + 1),
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 413
+    assert session.events == []
+    assert not session.committed
+
+
+def test_platform_webhook_does_not_acknowledge_event_insert_failure(
+    monkeypatch,
+):
+    tenant_id = uuid4()
+    context = SimpleNamespace(tenant_id=tenant_id)
+    session = FakePlatformSession(
+        _platform_bot(),
+        None,
+        context,
+        flush_error=RuntimeError("simulated event insert failure"),
+    )
+    monkeypatch.setattr(telegram_api, "encrypt_telegram_secret", lambda _value: "encrypted")
+    with _client(session, raise_server_exceptions=False) as client:
+        response = _post(client, _message_update(update_id=207))
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 500
     assert not session.committed
