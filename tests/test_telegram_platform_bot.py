@@ -127,7 +127,7 @@ def test_invalid_booking_reference_never_falls_back_to_existing_chat_context():
 
 def test_replayed_start_update_is_deduplicated_before_switching_tenant_context():
     bot = platform_bot()
-    duplicate = SimpleNamespace(payload_sha256="a" * 64)
+    duplicate = SimpleNamespace(id=uuid4(), payload_sha256="a" * 64)
     session = Session([bot, duplicate])
     with client_for(session) as client:
         response = client.post(
