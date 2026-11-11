@@ -3,15 +3,23 @@
 Transaction contract:
 - The caller owns the outer AsyncSession transaction and must commit or roll it
   back (normally with an explicit session.begin() context).
-- This service uses a SAVEPOINT, flushes its own writes, and never commits or
-  rolls back the caller's transaction.
-- Any exception rolls back this service's work to the SAVEPOINT. The caller may
-  catch the exception without leaving a partial tenant/audit mutation behind.
+- AsyncSession.begin_nested() unconditionally flushes all currently pending ORM
+  state before issuing the SAVEPOINT. That pre-flush is outside this service's
+  SAVEPOINT and is not undone if the service later fails.
+- Therefore, callers must acquire the tenant row's SELECT FOR UPDATE lock before
+  staging any tenant-scoped writes in the outer transaction, and must not enter
+  this service with unflushed tenant mutations that were staged before obtaining
+  that lock. The service's tenant lock then re-asserts/retains the serialization
+  mutex for its own transition and audit write.
+- This service flushes its own writes inside the SAVEPOINT and never commits or
+  rolls back the caller's outer transaction. Any exception rolls back service
+  changes to the SAVEPOINT; it cannot undo pre-SAVEPOINT caller flushes.
 
 Lock contract:
-- The tenant row is the lifecycle serialization mutex and is always locked
-  first. Existing REST booking/retail mutations and salon booking use the same
-  tenant-row SELECT FOR UPDATE lock before child-row work.
+- The tenant row is the lifecycle serialization mutex. All callers that combine
+  tenant mutations with this service must obtain that row lock first, before
+  staging tenant-scoped ORM writes. Existing REST booking/retail mutations and
+  salon booking use the same tenant-row SELECT FOR UPDATE lock before child-row work.
 - The actor is validated after acquiring the tenant lock, but is not separately
   locked: actor-row locking is not part of the shared mutation protocol and
   would add an unnecessary lock edge/deadlock risk.
@@ -70,9 +78,13 @@ async def transition_tenant_lifecycle(
 ) -> LifecycleTransitionResult:
     """Apply an owner lifecycle transition inside a caller-owned transaction.
 
-    The SAVEPOINT makes the service's tenant and audit writes atomic even when
-    the caller catches a service exception. Successful changes remain
-    uncommitted until the caller commits the outer transaction.
+    SQLAlchemy flushes all pending ORM state before begin_nested() creates its
+    SAVEPOINT. Callers must therefore acquire the tenant row lock before
+    staging tenant-scoped writes and must understand that pre-existing pending
+    work is flushed outside this service's SAVEPOINT. The tenant and audit
+    writes performed by this service are atomic within the SAVEPOINT.
+    Successful changes remain uncommitted until the caller commits the outer
+    transaction.
     """
     if target_status not in {"active", "deactivated"}:
         raise LifecycleTransitionError("Unsupported lifecycle target state.")
