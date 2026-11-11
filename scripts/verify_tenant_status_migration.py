@@ -103,8 +103,8 @@ async def main(action: str) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit(f"Usage: {sys.argv[0]} {'|'.join(sorted({
-            'seed', 'verify', 'seed-deactivated', 'verify-deactivated',
-            'reactivate-deactivated'
-        }))}")
+        raise SystemExit(
+            "Usage: verify_tenant_status_migration.py "
+            "seed|verify|seed-deactivated|verify-deactivated|reactivate-deactivated"
+        )
     asyncio.run(main(sys.argv[1]))
