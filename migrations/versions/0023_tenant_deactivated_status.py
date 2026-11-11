@@ -43,7 +43,7 @@ def _drop_tenant_status_check() -> None:
             f"found {len(names)}: {names!r}"
         )
 
-    op.drop_constraint(names[0], "tenants", type_="check")
+    op.drop_constraint(sa.schema.conv(names[0]), "tenants", type_="check")
 
 
 def upgrade() -> None:
