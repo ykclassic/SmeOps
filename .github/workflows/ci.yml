@@ -46,6 +46,12 @@ jobs:
         run: alembic upgrade head
       - name: Check migration metadata drift
         run: alembic check
+      - name: Verify tenant-status migration preserves populated databases
+        run: |
+          alembic downgrade 0016_tg_platform_secret
+          python scripts/verify_tenant_status_migration.py seed
+          alembic upgrade head
+          python scripts/verify_tenant_status_migration.py verify
       - name: Lint
         run: ruff check .
       - name: Tests
