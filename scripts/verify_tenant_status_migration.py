@@ -11,7 +11,7 @@ import asyncio
 import sys
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
@@ -38,7 +38,7 @@ async def seed(connection) -> None:
 
 async def verify(connection) -> None:
     result = await connection.execute(
-        text("SELECT id, status FROM tenants WHERE id = ANY(:tenant_ids)"),
+        text("SELECT id, status FROM tenants WHERE id IN :tenant_ids").bindparams(\n            bindparam("tenant_ids", expanding=True)\n        ),
         {"tenant_ids": [tenant_id for tenant_id, _, _ in TENANTS]},
     )
     actual = {row.id: row.status for row in result}
