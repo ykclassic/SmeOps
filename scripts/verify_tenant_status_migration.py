@@ -37,8 +37,11 @@ async def seed(connection) -> None:
 
 
 async def verify(connection) -> None:
+    statement = text(
+        "SELECT id, status FROM tenants WHERE id IN :tenant_ids"
+    ).bindparams(bindparam("tenant_ids", expanding=True))
     result = await connection.execute(
-        text("SELECT id, status FROM tenants WHERE id IN :tenant_ids").bindparams(\n            bindparam("tenant_ids", expanding=True)\n        ),
+        statement,
         {"tenant_ids": [tenant_id for tenant_id, _, _ in TENANTS]},
     )
     actual = {row.id: row.status for row in result}
