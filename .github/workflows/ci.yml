@@ -46,6 +46,29 @@ jobs:
         run: alembic upgrade head
       - name: Check migration metadata drift
         run: alembic check
+      - name: Verify tenant-status migration preserves populated databases
+        run: |
+          alembic downgrade 0022_tg_reply_markup
+          python scripts/verify_tenant_status_migration.py seed
+          alembic upgrade head
+          python scripts/verify_tenant_status_migration.py verify
+      - name: Verify downgrade refuses to discard deactivated tenant state
+        run: |
+          python scripts/verify_tenant_status_migration.py seed-deactivated
+          if alembic downgrade 0022_tg_reply_markup > /tmp/adm007-downgrade.log 2>&1; then
+            echo "Expected downgrade to refuse while deactivated tenants exist."
+            exit 1
+          fi
+          if ! grep -F "Cannot downgrade tenant status constraint while deactivated tenants exist." /tmp/adm007-downgrade.log; then
+            cat /tmp/adm007-downgrade.log
+            echo "Downgrade failed for an unexpected reason."
+            exit 1
+          fi
+          python scripts/verify_tenant_status_migration.py verify-deactivated
+          python scripts/verify_tenant_status_migration.py reactivate-deactivated
+          alembic downgrade 0022_tg_reply_markup
+          alembic upgrade head
+          python scripts/verify_tenant_status_migration.py verify
       - name: Lint
         run: ruff check .
       - name: Tests
