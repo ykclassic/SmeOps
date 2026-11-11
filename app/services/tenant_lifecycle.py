@@ -1,8 +1,22 @@
-"""Centralized, transactional tenant lifecycle transitions.
+"""Owner-initiated tenant lifecycle transitions.
 
-Only owner-initiated voluntary deactivation/reactivation is supported here.
-Platform-admin suspension and reactivation require the separate platform-admin
-identity and audit boundary and are deliberately not exposed by this service.
+Transaction contract:
+- The caller owns the outer AsyncSession transaction and must commit or roll it
+  back (normally with an explicit session.begin() context).
+- This service uses a SAVEPOINT, flushes its own writes, and never commits or
+  rolls back the caller's transaction.
+- Any exception rolls back this service's work to the SAVEPOINT. The caller may
+  catch the exception without leaving a partial tenant/audit mutation behind.
+
+Lock contract:
+- The tenant row is the lifecycle serialization mutex and is always locked
+  first. Existing REST booking/retail mutations and salon booking use the same
+  tenant-row SELECT FOR UPDATE lock before child-row work.
+- The actor is validated after acquiring the tenant lock, but is not separately
+  locked: actor-row locking is not part of the shared mutation protocol and
+  would add an unnecessary lock edge/deadlock risk.
+- The tenant lock remains held until the caller commits/rolls back the outer
+  transaction, not merely until this service releases its SAVEPOINT.
 """
 
 from dataclasses import dataclass
@@ -54,91 +68,88 @@ async def transition_tenant_lifecycle(
     target_status: LifecycleTarget,
     reason: str | None = None,
 ) -> LifecycleTransitionResult:
-    """Apply one owner lifecycle transition and commit its audit event atomically.
+    """Apply an owner lifecycle transition inside a caller-owned transaction.
 
-    The tenant row is locked first. Booking and retail mutation paths already use
-    this same tenant-row lock, so a successful deactivation serializes against
-    those transactions. Callers must supply actor identity from server-side
-    authentication; this function independently reloads and validates it.
-
-    This function owns the transaction commit. A no-op retry commits no audit
-    event, making repeated requests idempotent.
+    The SAVEPOINT makes the service's tenant and audit writes atomic even when
+    the caller catches a service exception. Successful changes remain
+    uncommitted until the caller commits the outer transaction.
     """
     if target_status not in {"active", "deactivated"}:
         raise LifecycleTransitionError("Unsupported lifecycle target state.")
     normalized_reason = _validate_reason(reason)
 
-    tenant_result = await session.execute(
-        select(Tenant).where(Tenant.id == tenant_id).with_for_update()
-    )
-    tenant = tenant_result.scalar_one_or_none()
-    if tenant is None:
-        raise LifecycleTransitionError("Business account was not found.")
-
-    actor_result = await session.execute(
-        select(User)
-        .where(
-            User.id == actor_user_id,
-            User.tenant_id == tenant_id,
-            User.status == "active",
-            User.role == "owner",
+    async with session.begin_nested():
+        tenant_result = await session.execute(
+            select(Tenant).where(Tenant.id == tenant_id).with_for_update()
         )
-        .with_for_update()
-    )
-    actor = actor_result.scalar_one_or_none()
-    if actor is None:
-        raise LifecycleTransitionError("An active owner of this business is required.")
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise LifecycleTransitionError("Business account was not found.")
 
-    previous_status = tenant.status
-    if previous_status == target_status:
-        await session.commit()
-        return LifecycleTransitionResult(
-            tenant_id=tenant.id,
-            previous_status=previous_status,
-            status=target_status,
-            changed=False,
-            audit_event_id=None,
+        # Lock order is tenant first, then ordinary reads. Do not add a User
+        # FOR UPDATE lock here: booking/retail writers do not share that lock.
+        actor_result = await session.execute(
+            select(User).where(
+                User.id == actor_user_id,
+                User.tenant_id == tenant_id,
+                User.status == "active",
+                User.role == "owner",
+            )
         )
+        actor = actor_result.scalar_one_or_none()
+        if actor is None:
+            raise LifecycleTransitionError("An active owner of this business is required.")
 
-    allowed_transition = (
-        (previous_status == "active" and target_status == "deactivated")
-        or (previous_status == "deactivated" and target_status == "active")
-    )
-    if not allowed_transition:
-        raise LifecycleTransitionError(
-            f"Transition from {previous_status!r} to {target_status!r} is not permitted."
-        )
+        previous_status = tenant.status
+        if previous_status == target_status:
+            result = LifecycleTransitionResult(
+                tenant_id=tenant.id,
+                previous_status=previous_status,
+                status=target_status,
+                changed=False,
+                audit_event_id=None,
+            )
+        else:
+            allowed_transition = (
+                (previous_status == "active" and target_status == "deactivated")
+                or (previous_status == "deactivated" and target_status == "active")
+            )
+            if not allowed_transition:
+                raise LifecycleTransitionError(
+                    f"Transition from {previous_status!r} to {target_status!r} "
+                    "is not permitted."
+                )
 
-    tenant.status = target_status
-    event_id = uuid4()
-    session.add(
-        AuditEvent(
-            id=event_id,
-            tenant_id=tenant.id,
-            actor_user_id=actor.id,
-            event_type=(
-                "tenant.deactivated" if target_status == "deactivated" else "tenant.reactivated"
-            ),
-            subject_type="tenant",
-            subject_id=tenant.id,
-            payload={
-                "from_status": previous_status,
-                "to_status": target_status,
-                "reason": normalized_reason,
-            },
-        )
-    )
+            tenant.status = target_status
+            event_id = uuid4()
+            session.add(
+                AuditEvent(
+                    id=event_id,
+                    tenant_id=tenant.id,
+                    actor_user_id=actor.id,
+                    event_type=(
+                        "tenant.deactivated"
+                        if target_status == "deactivated"
+                        else "tenant.reactivated"
+                    ),
+                    subject_type="tenant",
+                    subject_id=tenant.id,
+                    payload={
+                        "from_status": previous_status,
+                        "to_status": target_status,
+                        "reason": normalized_reason,
+                    },
+                )
+            )
+            # Surface constraint/insert failures while still inside the
+            # SAVEPOINT so the tenant update is rolled back with the audit.
+            await session.flush()
+            result = LifecycleTransitionResult(
+                tenant_id=tenant.id,
+                previous_status=previous_status,
+                status=target_status,
+                changed=True,
+                audit_event_id=event_id,
+            )
 
-    try:
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-
-    return LifecycleTransitionResult(
-        tenant_id=tenant.id,
-        previous_status=previous_status,
-        status=target_status,
-        changed=True,
-        audit_event_id=event_id,
-    )
+    return result
