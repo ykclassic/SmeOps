@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import delete, event, func, select, text
 
 from app.db.session import AsyncSessionFactory
-from app.models import AuditEvent, BusinessHours, Service, Tenant, User
+from app.models import Appointment, AuditEvent, BusinessHours, Service, Tenant, User
 from app.services.tenant_lifecycle import (
     LifecycleTransitionError,
     transition_tenant_lifecycle,
@@ -54,6 +54,10 @@ async def _create_tenant(*, status: str = "active", owner_role: str = "owner"):
 async def _cleanup_tenant(tenant_id):
     async with AsyncSessionFactory() as session:
         async with session.begin():
+            # Real booking-path tests create appointments whose creator FK
+            # references the tenant owner. Remove those dependent rows before
+            # deleting users so cleanup respects the production FK graph.
+            await session.execute(delete(Appointment).where(Appointment.tenant_id == tenant_id))
             await session.execute(delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id))
             await session.execute(delete(User).where(User.tenant_id == tenant_id))
             await session.execute(delete(Tenant).where(Tenant.id == tenant_id))
