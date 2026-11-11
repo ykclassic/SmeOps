@@ -326,7 +326,6 @@ async def test_deactivation_serializes_against_real_salon_booking_path(monkeypat
 
         async def attempt_booking():
             from app.services.salon_booking import (
-                BookingConflict,
                 create_appointment_booking,
             )
 
