@@ -107,6 +107,25 @@ async def test_owner_transition_updates_state_and_audit_atomically(
         await _cleanup_tenant(tenant_id)
 
 
+async def test_service_requires_caller_started_transaction():
+    tenant_id, owner_id, _ = await _create_tenant()
+    try:
+        async with AsyncSessionFactory() as session:
+            with pytest.raises(LifecycleTransitionError, match="caller must start"):
+                await transition_tenant_lifecycle(
+                    session,
+                    tenant_id=tenant_id,
+                    actor_user_id=owner_id,
+                    target_status="deactivated",
+                )
+
+        actual_status, event_count = await _status_and_audit_count(tenant_id)
+        assert actual_status == "active"
+        assert event_count == 0
+    finally:
+        await _cleanup_tenant(tenant_id)
+
+
 async def test_repeated_transition_is_noop_without_duplicate_audit():
     tenant_id, owner_id, _ = await _create_tenant()
     try:
