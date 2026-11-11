@@ -77,6 +77,10 @@ async def transition_tenant_lifecycle(
     if target_status not in {"active", "deactivated"}:
         raise LifecycleTransitionError("Unsupported lifecycle target state.")
     normalized_reason = _validate_reason(reason)
+    if not session.in_transaction():
+        raise LifecycleTransitionError(
+            "The caller must start the outer database transaction before this operation."
+        )
 
     async with session.begin_nested():
         tenant_result = await session.execute(
