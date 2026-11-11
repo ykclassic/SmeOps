@@ -10,7 +10,7 @@ class Tenant(UUIDPrimaryKey, TimestampMixin, Base):
     __tablename__ = "tenants"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('active', 'suspended', 'pending')",
+            "status IN ('active', 'deactivated', 'suspended', 'pending')",
             name="tenant_status_valid",
         ),
     )
@@ -20,6 +20,6 @@ class Tenant(UUIDPrimaryKey, TimestampMixin, Base):
     business_timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, default="Africa/Lagos", server_default="Africa/Lagos"
     )
-    status: Mapped[Literal["active", "suspended", "pending"]] = mapped_column(
+    status: Mapped[Literal["active", "deactivated", "suspended", "pending"]] = mapped_column(
         String(16), nullable=False, default="pending", server_default=text("'pending'")
     )
