@@ -14,23 +14,30 @@ bearer_scheme = HTTPBearer(auto_error=False)
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
-async def get_current_user(
-    session: DbSession,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> User:
-    unauthorized = HTTPException(
+def _unauthorized() -> HTTPException:
+    return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired authentication credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def _decode_identity(
+    credentials: HTTPAuthorizationCredentials | None,
+) -> tuple:
     if credentials is None or credentials.scheme.lower() != "bearer":
-        raise unauthorized
-
+        raise _unauthorized()
     try:
-        user_id, tenant_id = decode_access_token(credentials.credentials)
+        return decode_access_token(credentials.credentials)
     except (jwt.InvalidTokenError, ValueError, TypeError):
-        raise unauthorized from None
+        raise _unauthorized() from None
 
+
+async def get_current_user(
+    session: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> User:
+    user_id, tenant_id = await _decode_identity(credentials)
     result = await session.execute(
         select(User)
         .join(Tenant, Tenant.id == User.tenant_id)
@@ -43,11 +50,40 @@ async def get_current_user(
     )
     user = result.scalar_one_or_none()
     if user is None:
-        raise unauthorized
+        raise _unauthorized()
+    return user
+
+
+async def get_lifecycle_owner(
+    session: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> User:
+    """Authenticate an owner for lifecycle endpoints only.
+
+    This intentionally accepts active or deactivated tenants, but never
+    suspended/pending tenants, disabled users, or non-owner roles. It does not
+    replace CurrentUser and must not be used by ordinary business routes.
+    """
+    user_id, tenant_id = await _decode_identity(credentials)
+    result = await session.execute(
+        select(User)
+        .join(Tenant, Tenant.id == User.tenant_id)
+        .where(
+            User.id == user_id,
+            User.tenant_id == tenant_id,
+            User.status == "active",
+            User.role == "owner",
+            Tenant.status.in_(("active", "deactivated")),
+        )
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise _unauthorized()
     return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+LifecycleOwner = Annotated[User, Depends(get_lifecycle_owner)]
 
 
 def require_roles(*allowed_roles: str):
