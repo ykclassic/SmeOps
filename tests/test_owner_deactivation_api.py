@@ -4,8 +4,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy import delete, event, func, select
 
 from app.core.security import create_access_token
 from app.db.session import AsyncSessionFactory
@@ -96,7 +96,6 @@ def _cleanup_tenant(tenant_id: str) -> None:
                 await session.execute(delete(Tenant).where(Tenant.id == UUID(tenant_id)))
 
     asyncio.run(cleanup())
-
 
 
 def test_owner_deactivation_requires_authentication() -> None:
