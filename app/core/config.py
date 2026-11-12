@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     whatsapp_app_secret: SecretStr | None = None
     whatsapp_token_encryption_key: SecretStr | None = None
     platform_admin_key: SecretStr | None = None
+    # Must remain false until ADM-010 through ADM-015 are implemented and accepted.
+    owner_deactivation_api_enabled: bool = False
     whatsapp_graph_api_version: str | None = None
     meta_app_id: str | None = None
     meta_app_secret: SecretStr | None = None
