@@ -22,7 +22,7 @@ def _register_owner(client: TestClient) -> tuple[str, str, str]:
         json={
             "business_name": "ADM-009 API test",
             "tenant_slug": slug,
-            "email": f"{slug}@example.test",
+            "email": f"{slug}@example.com",
             "password": PASSWORD,
             "business_timezone": "Africa/Lagos",
         },
