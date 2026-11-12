@@ -11,6 +11,11 @@ from app.schemas.lifecycle import (
     OwnerDeactivationRequest,
     OwnerDeactivationResponse,
 )
+from app.services.auth_rate_limit import (
+    AuthRateLimitExceeded,
+    clear_auth_attempts,
+    consume_auth_attempt,
+)
 from app.services.tenant_lifecycle import (
     LifecycleTransitionError,
     transition_tenant_lifecycle,
@@ -31,9 +36,24 @@ async def deactivate_owner_account(
     user: OwnerUser,
 ) -> OwnerDeactivationResponse:
     # Keep this API unavailable until all ingress, worker, outbound and
-    # restricted-reactivation enforcement work is complete and accepted.
+    # restricted-reactivation enforcement work is complete.
     if not get_settings().owner_deactivation_api_enabled:
         raise HTTPException(status_code=404, detail="Not found")
+
+    # Persist failed step-up attempts independently from the lifecycle
+    # transaction. The shared limiter caps attempts at five per 15-minute window.
+    try:
+        await consume_auth_attempt(
+            session,
+            scope="owner-deactivation",
+            identifier=str(user.id),
+        )
+    except AuthRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many reauthentication attempts. Try again later.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
 
     if not verify_password(payload.password.get_secret_value(), user.password_hash):
         raise HTTPException(
@@ -42,24 +62,27 @@ async def deactivate_owner_account(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    try:
-        result = await transition_tenant_lifecycle(
-            session,
-            tenant_id=user.tenant_id,
-            actor_user_id=user.id,
-            target_status="deactivated",
-            reason=payload.reason,
-        )
-    except LifecycleTransitionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Clear failed attempts after successful step-up verification. The limiter
+    # helper commits its own small transaction, so begin the lifecycle
+    # transaction only after it returns.
+    await clear_auth_attempts(
+        session,
+        scope="owner-deactivation",
+        identifier=str(user.id),
+    )
 
     try:
-        # Authentication has already opened the caller's AsyncSession
-        # transaction. The lifecycle service uses a SAVEPOINT and deliberately
-        # leaves this outer transaction under endpoint ownership.
-        await session.commit()
+        async with session.begin():
+            result = await transition_tenant_lifecycle(
+                session,
+                tenant_id=user.tenant_id,
+                actor_user_id=user.id,
+                target_status="deactivated",
+                reason=payload.reason,
+            )
+    except LifecycleTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SQLAlchemyError as exc:
-        await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Account state could not be saved",
