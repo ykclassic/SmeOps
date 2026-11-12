@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token
+from app.api.dependencies import DbSession, get_current_user
+from app.core.security import create_access_token, hash_password
 from app.db.session import AsyncSessionFactory
 from app.main import app
 from app.models import AuditEvent, Tenant, User
@@ -260,5 +261,52 @@ def test_audit_insert_failure_rolls_back_api_transition(
     try:
         assert response.status_code == 500
         assert _lifecycle_evidence(tenant_id) == ("active", 0)
+    finally:
+        _cleanup_tenant(tenant_id)
+
+
+def test_owner_deactivation_uses_fresh_password_hash_after_concurrent_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_endpoint(monkeypatch)
+    new_password = "New-Password-After-Change-73"
+
+    with TestClient(app) as client:
+        token, tenant_id, user_id = _register_owner(client)
+
+        async def stale_authenticated_user(session: DbSession) -> User:
+            # Resolve authentication first, retaining the original ORM instance
+            # in the request session's identity map.
+            stale_user = await session.get(User, UUID(user_id))
+            assert stale_user is not None
+
+            # Simulate a password change committed by another request/session
+            # after authentication resolution but before step-up verification.
+            async with AsyncSessionFactory() as password_change_session:
+                async with password_change_session.begin():
+                    current_user = await password_change_session.get(
+                        User, UUID(user_id)
+                    )
+                    assert current_user is not None
+                    current_user.password_hash = hash_password(new_password)
+
+            return stale_user
+
+        app.dependency_overrides[get_current_user] = stale_authenticated_user
+        try:
+            response = client.post(
+                "/account/deactivate",
+                headers=_headers(token),
+                json={
+                    "confirmation": "DEACTIVATE",
+                    "password": new_password,
+                },
+            )
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    try:
+        assert response.status_code == 200
+        assert _lifecycle_evidence(tenant_id) == ("deactivated", 1)
     finally:
         _cleanup_tenant(tenant_id)
