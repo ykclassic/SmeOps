@@ -294,7 +294,15 @@ def test_owner_deactivation_uses_fresh_password_hash_after_concurrent_change(
 
         app.dependency_overrides[get_current_user] = stale_authenticated_user
         try:
-            response = client.post(
+            stale_password_response = client.post(
+                "/account/deactivate",
+                headers=_headers(token),
+                json={
+                    "confirmation": "DEACTIVATE",
+                    "password": PASSWORD,
+                },
+            )
+            fresh_password_response = client.post(
                 "/account/deactivate",
                 headers=_headers(token),
                 json={
@@ -306,7 +314,8 @@ def test_owner_deactivation_uses_fresh_password_hash_after_concurrent_change(
             app.dependency_overrides.pop(get_current_user, None)
 
     try:
-        assert response.status_code == 200
+        assert stale_password_response.status_code == 401
+        assert fresh_password_response.status_code == 200
         assert _lifecycle_evidence(tenant_id) == ("deactivated", 1)
     finally:
         _cleanup_tenant(tenant_id)
