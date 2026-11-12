@@ -70,11 +70,11 @@ def _lifecycle_evidence(tenant_id: str) -> tuple[str, int]:
     async def read_evidence() -> tuple[str, int]:
         async with AsyncSessionFactory() as session:
             tenant_status = await session.scalar(
-                select(Tenant.status).where(Tenant.id == tenant_id)
+                select(Tenant.status).where(Tenant.id == UUID(tenant_id))
             )
             count = await session.scalar(
                 select(func.count(AuditEvent.id)).where(
-                    AuditEvent.tenant_id == tenant_id,
+                    AuditEvent.tenant_id == UUID(tenant_id),
                     AuditEvent.event_type == "tenant.deactivated",
                 )
             )
@@ -88,12 +88,12 @@ def _cleanup_tenant(tenant_id: str) -> None:
         async with AsyncSessionFactory() as session:
             async with session.begin():
                 await session.execute(
-                    delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id)
+                    delete(AuditEvent).where(AuditEvent.tenant_id == UUID(tenant_id))
                 )
                 await session.execute(
-                    delete(User).where(User.tenant_id == tenant_id)
+                    delete(User).where(User.tenant_id == UUID(tenant_id))
                 )
-                await session.execute(delete(Tenant).where(Tenant.id == tenant_id))
+                await session.execute(delete(Tenant).where(Tenant.id == UUID(tenant_id)))
 
     asyncio.run(cleanup())
 
