@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.dependencies import DbSession, require_roles
@@ -55,7 +56,20 @@ async def deactivate_owner_account(
             headers={"Retry-After": str(exc.retry_after)},
         ) from exc
 
-    if not verify_password(payload.password.get_secret_value(), user.password_hash):
+    # The authenticated User instance may have been loaded before a concurrent
+    # password change. Read the hash directly from the database after limiter
+    # commits so step-up verification never trusts a stale identity-map value.
+    current_password_hash = await session.scalar(
+        select(User.password_hash).where(
+            User.id == user.id,
+            User.tenant_id == user.tenant_id,
+            User.status == "active",
+        )
+    )
+    if current_password_hash is None or not verify_password(
+        payload.password.get_secret_value(),
+        current_password_hash,
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Recent password verification failed",
