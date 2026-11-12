@@ -1,11 +1,11 @@
 import asyncio
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session, event
+from sqlalchemy import delete, event, func, select
+from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.session import AsyncSessionFactory
@@ -54,15 +54,15 @@ def _set_role_and_issue_token(tenant_id: str, user_id: str, role: str) -> str:
     async def update_role() -> None:
         async with AsyncSessionFactory() as session:
             async with session.begin():
-                user = await session.get(User, user_id)
+                user = await session.get(User, UUID(user_id))
                 assert user is not None
                 assert str(user.tenant_id) == tenant_id
                 user.role = role
 
     asyncio.run(update_role())
     return create_access_token(
-        user_id=__import__("uuid").UUID(user_id),
-        tenant_id=__import__("uuid").UUID(tenant_id),
+        user_id=UUID(user_id),
+        tenant_id=UUID(tenant_id),
     )
 
 
@@ -159,7 +159,7 @@ def test_non_owner_cannot_deactivate_tenant(
 ) -> None:
     _enable_endpoint(monkeypatch)
     with TestClient(app) as client:
-        owner_token, tenant_id, owner_id = _register_owner(client)
+        _, tenant_id, owner_id = _register_owner(client)
         token = _set_role_and_issue_token(tenant_id, owner_id, role)
         response = client.post(
             "/account/deactivate",
