@@ -4,14 +4,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 from sqlalchemy import delete, event, func, select
+from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.session import AsyncSessionFactory
 from app.main import app
 from app.models import AuditEvent, Tenant, User
-
 
 PASSWORD = "Correct-Horse-Battery-42"
 
