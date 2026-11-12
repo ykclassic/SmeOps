@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
+from app.api.account import router as account_router
 from app.api.business import router as business_router
 from app.api.health import router as health_router
 from app.api.ops import router as ops_router
@@ -98,6 +99,7 @@ async def add_security_headers(request, call_next):
 app.include_router(health_router)
 app.include_router(ops_router)
 app.include_router(auth_router)
+app.include_router(account_router)
 app.include_router(business_router)
 app.include_router(retail_router)
 app.include_router(whatsapp_router)
