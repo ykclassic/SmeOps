@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.dependencies import DbSession, require_roles
@@ -15,7 +17,7 @@ from app.services.tenant_lifecycle import (
 )
 
 router = APIRouter(prefix="/account", tags=["account management"])
-OwnerUser = require_roles("owner")
+OwnerUser = Annotated[User, Depends(require_roles("owner"))]
 
 
 @router.post(
@@ -26,7 +28,7 @@ OwnerUser = require_roles("owner")
 async def deactivate_owner_account(
     payload: OwnerDeactivationRequest,
     session: DbSession,
-    user: User = __import__("fastapi").Depends(OwnerUser),
+    user: OwnerUser,
 ) -> OwnerDeactivationResponse:
     # Keep this API unavailable until all ingress, worker, outbound and
     # restricted-reactivation enforcement work is complete and accepted.
