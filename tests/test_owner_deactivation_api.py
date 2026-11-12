@@ -98,6 +98,16 @@ def _cleanup_tenant(tenant_id: str) -> None:
     asyncio.run(cleanup())
 
 
+
+def test_owner_deactivation_requires_authentication() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/account/deactivate",
+            json={"confirmation": "DEACTIVATE", "password": PASSWORD},
+        )
+    assert response.status_code == 401
+
+
 def test_owner_deactivation_endpoint_is_disabled_by_default() -> None:
     with TestClient(app) as client:
         token, tenant_id, _ = _register_owner(client)
