@@ -286,6 +286,23 @@ async def process_channel_conversation_job(
     )
 
     async with AsyncSessionFactory() as session:
+        if channel == "telegram":
+            lifecycle_result = await session.execute(
+                select(Tenant).where(Tenant.id == job.tenant_id)
+            )
+            lifecycle_tenant = lifecycle_result.scalar_one_or_none()
+            if lifecycle_tenant is None:
+                raise ValueError("Telegram conversation tenant does not exist")
+            if lifecycle_tenant.status != "active":
+                logger.info(
+                    "Telegram conversation job skipped for inactive tenant",
+                    extra={
+                        "tenant_id": str(job.tenant_id),
+                        "tenant_status": lifecycle_tenant.status,
+                    },
+                )
+                return
+
         conversation_result = await session.execute(
             select(conversation_model)
             .where(
@@ -1230,6 +1247,28 @@ async def process_channel_conversation_job(
         context["last_processed_at"] = inbound.created_at.isoformat()
         context["last_processed_message_id"] = str(inbound.id)
         conversation.context = context
+        if channel == "telegram":
+            # Revalidate under the tenant mutex immediately before committing
+            # conversation state and outbound work. Pending ORM writes must not
+            # autoflush before this lock is acquired.
+            with session.no_autoflush:
+                final_tenant_result = await session.execute(
+                    select(Tenant).where(Tenant.id == job.tenant_id).with_for_update()
+                )
+            final_tenant = final_tenant_result.scalar_one_or_none()
+            if final_tenant is None:
+                await session.rollback()
+                raise ValueError("Telegram conversation tenant does not exist")
+            if final_tenant.status != "active":
+                await session.rollback()
+                logger.info(
+                    "Telegram conversation result discarded after tenant deactivation",
+                    extra={
+                        "tenant_id": str(job.tenant_id),
+                        "tenant_status": final_tenant.status,
+                    },
+                )
+                return
         try:
             await _send_reply(
                 session,
