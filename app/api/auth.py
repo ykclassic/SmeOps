@@ -1,7 +1,7 @@
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentUser, DbSession
@@ -97,7 +97,10 @@ async def login(payload: LoginRequest, session: DbSession) -> TokenResponse:
         .join(Tenant, Tenant.id == User.tenant_id)
         .where(
             Tenant.slug == payload.tenant_slug,
-            Tenant.status == "active",
+            or_(
+                Tenant.status == "active",
+                (Tenant.status == "deactivated") & (User.role == "owner"),
+            ),
             User.email == str(payload.email).strip().lower(),
             User.status == "active",
         )
