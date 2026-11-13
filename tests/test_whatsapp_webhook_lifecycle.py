@@ -267,6 +267,7 @@ async def test_mixed_tenant_webhook_payload_only_queues_active_tenant_events():
         assert suspended_events.scalars().all() == []
         assert suspended_jobs.scalars().all() == []
 
+
 class _TenantLockBarrierSession:
     def __init__(self, session, barrier: asyncio.Barrier):
         self._session = session
