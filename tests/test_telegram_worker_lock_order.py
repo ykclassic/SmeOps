@@ -168,6 +168,15 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
         "_service_menu",
         pause_during_conversation_processing,
     )
+
+    async def no_telegram_api_calls(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        conversation_engine,
+        "ensure_private_chat_commands",
+        no_telegram_api_calls,
+    )
     monkeypatch.setattr(conversation_engine, "_send_reply", no_outbound)
 
     conversation_task = asyncio.create_task(
