@@ -381,14 +381,13 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
                 async def invoke_rest_operation():
                     nonlocal request_pid
                     async with AsyncSessionFactory() as request_session:
-                        async with request_session.begin():
-                            request_pid = await request_session.scalar(
-                                text("SELECT pg_backend_pid()")
-                            )
-                            user = await request_session.get(User, owner_id)
-                            assert user is not None
-                            started.set()
-                            if operation == "appointment_create":
+                        request_pid = await request_session.scalar(
+                            text("SELECT pg_backend_pid()")
+                        )
+                        user = await request_session.get(User, owner_id)
+                        assert user is not None
+                        started.set()
+                        if operation == "appointment_create":
                                 from app.api.business import create_appointment
 
                                 payload = AppointmentCreate(
@@ -398,17 +397,17 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
                                     customer_phone="+2348012345678",
                                     starts_at=local_start,
                                 )
-                                return await create_appointment(payload, request_session, user)
+                            return await create_appointment(payload, request_session, user)
 
-                            from app.api.retail import create_order
+                        from app.api.retail import create_order
 
-                            payload = OrderCreate(
-                                idempotency_key=uuid4(),
-                                customer_name="REST lock customer",
-                                customer_phone="+2348098765432",
-                                items=[OrderItemCreate(product_id=product_id, quantity=1)],
-                            )
-                            return await create_order(payload, request_session, user)
+                        payload = OrderCreate(
+                            idempotency_key=uuid4(),
+                            customer_name="REST lock customer",
+                            customer_phone="+2348098765432",
+                            items=[OrderItemCreate(product_id=product_id, quantity=1)],
+                        )
+                        return await create_order(payload, request_session, user)
 
                 task = asyncio.create_task(invoke_rest_operation())
                 await asyncio.wait_for(started.wait(), timeout=2)
