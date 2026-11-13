@@ -86,7 +86,7 @@ def test_shared_bot_resolves_booking_link_and_queues_tenant_scoped_event(monkeyp
     tenant_id = uuid4()
     bot = platform_bot()
     reference = SimpleNamespace(tenant_id=tenant_id)
-    session = Session([bot, None, None, reference, None, SimpleNamespace(status="active")])
+    session = Session([bot, None, None, reference, SimpleNamespace(status="active"), None])
     jobs = []
 
     async def enqueue(_session, **kwargs):
@@ -222,7 +222,7 @@ def test_same_platform_bot_switches_between_two_businesses_only_on_valid_links(m
         (202, tenant_b, "book_tenant-b-reference"),
     ):
         reference = SimpleNamespace(tenant_id=tenant_id)
-        session = Session([bot, None, None, reference, context, SimpleNamespace(status="active")])
+        session = Session([bot, None, None, reference, SimpleNamespace(status="active"), context])
         payload = start_update(token, update_id=update_id)
         with client_for(session) as client:
             response = client.post(
