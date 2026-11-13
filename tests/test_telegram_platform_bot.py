@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -26,6 +27,10 @@ class Nested:
 
 
 class Session:
+    @property
+    def no_autoflush(self):
+        return nullcontext()
+
     def __init__(self, values):
         self.values = list(values)
         self.records = []
@@ -81,7 +86,7 @@ def test_shared_bot_resolves_booking_link_and_queues_tenant_scoped_event(monkeyp
     tenant_id = uuid4()
     bot = platform_bot()
     reference = SimpleNamespace(tenant_id=tenant_id)
-    session = Session([bot, None, None, reference, None])
+    session = Session([bot, None, None, reference, SimpleNamespace(status="active"), None])
     jobs = []
 
     async def enqueue(_session, **kwargs):
@@ -125,6 +130,61 @@ def test_invalid_booking_reference_never_falls_back_to_existing_chat_context():
     assert not session.committed
 
 
+def test_inactive_tenant_booking_link_is_ignored_without_switching_chat_context(monkeypatch):
+    tenant_id = uuid4()
+    bot = platform_bot()
+    reference = SimpleNamespace(tenant_id=tenant_id)
+    inactive_tenant = SimpleNamespace(status="deactivated")
+    session = Session([bot, None, None, reference, None, inactive_tenant])
+    jobs = []
+
+    async def enqueue(_session, **kwargs):
+        jobs.append(kwargs)
+
+    monkeypatch.setattr(telegram_api, "enqueue_job", enqueue)
+    with client_for(session) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
+            json=start_update("book_deactivated-business-reference"),
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "queued_events": 0}
+    assert session.records == []
+    assert not session.committed
+    assert jobs == []
+
+
+def test_inactive_existing_chat_context_cannot_continue_booking():
+    bot = platform_bot()
+    tenant_id = uuid4()
+    context = SimpleNamespace(tenant_id=tenant_id)
+    session = Session([bot, None, context, SimpleNamespace(status="suspended")])
+    payload = {
+        "update_id": 301,
+        "message": {
+            "message_id": 301,
+            "chat": {"id": 7001, "type": "private"},
+            "from": {"id": 7001, "is_bot": False},
+            "text": "BOOK",
+        },
+    }
+    with client_for(session) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
+            json=payload,
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "queued_events": 0}
+    assert session.records == []
+    assert not session.committed
+
+
 def test_replayed_start_update_is_deduplicated_before_switching_tenant_context():
     bot = platform_bot()
     duplicate = SimpleNamespace(id=uuid4(), payload_sha256="a" * 64)
@@ -162,7 +222,7 @@ def test_same_platform_bot_switches_between_two_businesses_only_on_valid_links(m
         (202, tenant_b, "book_tenant-b-reference"),
     ):
         reference = SimpleNamespace(tenant_id=tenant_id)
-        session = Session([bot, None, None, reference, context])
+        session = Session([bot, None, None, reference, SimpleNamespace(status="active"), context])
         payload = start_update(token, update_id=update_id)
         with client_for(session) as client:
             response = client.post(

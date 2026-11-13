@@ -1,5 +1,6 @@
 import hashlib
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -33,8 +34,12 @@ class Nested:
 
 
 class WebhookSession:
+    @property
+    def no_autoflush(self):
+        return nullcontext()
+
     def __init__(self, connection, existing=None):
-        self.values = [connection, existing]
+        self.values = [connection, SimpleNamespace(status="active"), existing]
         self.records = []
         self.committed = False
 

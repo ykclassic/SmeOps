@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -26,15 +27,24 @@ class FakeNested:
 
 
 class FakeSession:
-    def __init__(self, connection):
+    @property
+    def no_autoflush(self):
+        return nullcontext()
+
+    def __init__(self, connection, tenant_status="active"):
         self.connection = connection
+        self.tenant_status = tenant_status
         self.events = []
         self.execute_count = 0
         self.committed = False
 
     async def execute(self, _statement):
         self.execute_count += 1
-        return FakeResult(self.connection if self.execute_count == 1 else None)
+        if self.execute_count == 1:
+            return FakeResult(self.connection)
+        if self.execute_count == 2:
+            return FakeResult(SimpleNamespace(status=self.tenant_status))
+        return FakeResult(None)
 
     def begin_nested(self):
         return FakeNested()
@@ -117,6 +127,30 @@ def test_telegram_webhook_persists_and_queues_valid_update(monkeypatch):
     assert session.events[0].provider_update_id == "987"
     assert queued[0]["job_type"] == "telegram.accept_inbound"
     assert queued[0]["tenant_id"] == tenant_id
+
+
+def test_legacy_telegram_webhook_ignores_inactive_tenant():
+    connection = SimpleNamespace(
+        tenant_id=uuid4(),
+        bot_id="9016622451",
+        webhook_secret_hash=hash_telegram_webhook_secret("correct-secret"),
+    )
+    session = FakeSession(connection, tenant_status="suspended")
+    with _client_with_session(session) as client:
+        response = client.post(
+            "/webhooks/telegram/123456789",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "correct-secret"},
+            json={
+                "update_id": 988,
+                "message": {"message_id": 45, "chat": {"id": 55}, "from": {"id": 55}},
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "queued_events": 0}
+    assert session.events == []
+    assert not session.committed
 
 
 def test_telegram_webhook_rejects_malformed_update_id(monkeypatch):
