@@ -285,12 +285,65 @@ async def process_channel_conversation_job(
         decrypt_telegram_secret if channel == "telegram" else decrypt_whatsapp_secret
     )
 
+    if channel == "telegram":
+        # Check lifecycle and load Telegram provisioning details in a short
+        # read transaction. The Telegram Bot API calls below must not run while
+        # holding tenant/conversation row locks or an open DB transaction.
+        async with AsyncSessionFactory() as provisioning_session:
+            lifecycle_result = await provisioning_session.execute(
+                select(Tenant).where(Tenant.id == job.tenant_id)
+            )
+            lifecycle_tenant = lifecycle_result.scalar_one_or_none()
+            if lifecycle_tenant is None:
+                raise ValueError("Telegram conversation tenant does not exist")
+            if lifecycle_tenant.status != "active":
+                logger.info(
+                    "Telegram conversation job skipped for inactive tenant",
+                    extra={
+                        "tenant_id": str(job.tenant_id),
+                        "tenant_status": lifecycle_tenant.status,
+                    },
+                )
+                return
+
+            provisioning_conversation_result = await provisioning_session.execute(
+                select(TelegramConversation).where(
+                    TelegramConversation.id == conversation_id,
+                    TelegramConversation.tenant_id == job.tenant_id,
+                )
+            )
+            provisioning_conversation = (
+                provisioning_conversation_result.scalar_one_or_none()
+            )
+            if provisioning_conversation is None:
+                raise ValueError("Conversation does not exist")
+
+            platform_result = await provisioning_session.execute(
+                select(TelegramPlatformBot).where(
+                    TelegramPlatformBot.singleton_key == "platform",
+                    TelegramPlatformBot.status == "active",
+                )
+            )
+            platform_bot = platform_result.scalar_one_or_none()
+            if platform_bot is None:
+                raise RuntimeError("Active SmeOps Telegram platform bot is unavailable")
+            provisioning_token = decrypt_telegram_secret(
+                platform_bot.bot_token_encrypted
+            )
+            provisioning_bot_id = platform_bot.bot_id
+            provisioning_chat_id = provisioning_conversation.telegram_chat_id
+
+        # Network I/O occurs with no tenant or conversation locks held.
+        await ensure_private_chat_commands(
+            bot_token=provisioning_token,
+            bot_id=provisioning_bot_id,
+            chat_id=provisioning_chat_id,
+        )
+
     async with AsyncSessionFactory() as session:
         if channel == "telegram":
-            # Keep Telegram worker lock order consistent: tenant first, then
-            # TelegramConversation. Inbound ingestion holds the tenant mutex
-            # before locking/creating a conversation, so reversing this order
-            # here can deadlock concurrent inbound and conversation workers.
+            # Re-check under the tenant mutex after external provisioning.
+            # Lock order remains tenant first, then TelegramConversation.
             lifecycle_result = await session.execute(
                 select(Tenant)
                 .where(Tenant.id == job.tenant_id)
@@ -335,22 +388,6 @@ async def process_channel_conversation_job(
             and not getattr(inbound, "contact_phone_encrypted", None)
         ):
             return
-
-        if channel == "telegram":
-            platform_result = await session.execute(
-                select(TelegramPlatformBot).where(
-                    TelegramPlatformBot.singleton_key == "platform",
-                    TelegramPlatformBot.status == "active",
-                )
-            )
-            platform_bot = platform_result.scalar_one_or_none()
-            if platform_bot is None:
-                raise RuntimeError("Active SmeOps Telegram platform bot is unavailable")
-            await ensure_private_chat_commands(
-                bot_token=decrypt_telegram_secret(platform_bot.bot_token_encrypted),
-                bot_id=platform_bot.bot_id,
-                chat_id=conversation.telegram_chat_id,
-            )
 
         if (
             (channel == "whatsapp" and conversation.is_opted_out)
