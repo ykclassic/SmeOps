@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.jobs.queue import ClaimedJob
 from app.jobs import telegram as telegram_jobs
+from app.jobs.queue import ClaimedJob
 from app.services import conversation_engine
 
 
