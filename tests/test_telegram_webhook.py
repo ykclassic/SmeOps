@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -26,6 +27,10 @@ class FakeNested:
 
 
 class FakeSession:
+    @property
+    def no_autoflush(self):
+        return nullcontext()
+
     def __init__(self, connection):
         self.connection = connection
         self.events = []
@@ -34,7 +39,11 @@ class FakeSession:
 
     async def execute(self, _statement):
         self.execute_count += 1
-        return FakeResult(self.connection if self.execute_count == 1 else None)
+        if self.execute_count == 1:
+            return FakeResult(self.connection)
+        if self.execute_count == 2:
+            return FakeResult(SimpleNamespace(status="active"))
+        return FakeResult(None)
 
     def begin_nested(self):
         return FakeNested()
