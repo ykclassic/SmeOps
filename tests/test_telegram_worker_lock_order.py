@@ -7,16 +7,15 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app import db
-from app.core.telegram import encrypt_telegram_secret
 from app.jobs import telegram as telegram_jobs
 from app.jobs.queue import ClaimedJob
 from app.models import (
     BackgroundJob,
-    Tenant,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramPlatformBot,
     TelegramWebhookEvent,
+    Tenant,
 )
 from app.services import conversation_engine
 
