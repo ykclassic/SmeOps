@@ -278,7 +278,12 @@ def _mutation_requests(client: TestClient, token: str, seeded: tuple[dict, dict,
         }),
         client.put("/business-hours", headers=headers, json={
             "days": [
-                {"weekday": day, "is_closed": False, "opens_at": "08:00:00", "closes_at": "18:00:00"}
+                {
+                    "weekday": day,
+                    "is_closed": False,
+                    "opens_at": "08:00:00",
+                    "closes_at": "18:00:00",
+                }
                 for day in range(7)
             ]
         }),
@@ -512,13 +517,19 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
                     delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id)
                 )
                 await cleanup.execute(
-                    delete(TelegramOutboundMessage).where(TelegramOutboundMessage.tenant_id == tenant_id)
+                    delete(TelegramOutboundMessage).where(
+                        TelegramOutboundMessage.tenant_id == tenant_id
+                    )
                 )
                 await cleanup.execute(
-                    delete(TelegramOwnerNotification).where(TelegramOwnerNotification.tenant_id == tenant_id)
+                    delete(TelegramOwnerNotification).where(
+                        TelegramOwnerNotification.tenant_id == tenant_id
+                    )
                 )
                 await cleanup.execute(
-                    delete(WhatsAppOutboundMessage).where(WhatsAppOutboundMessage.tenant_id == tenant_id)
+                    delete(WhatsAppOutboundMessage).where(
+                        WhatsAppOutboundMessage.tenant_id == tenant_id
+                    )
                 )
                 await cleanup.execute(
                     delete(BackgroundJob).where(BackgroundJob.tenant_id == tenant_id)
