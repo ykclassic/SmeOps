@@ -155,17 +155,18 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
         lambda _value: "hello",
     )
 
-    async def pause_after_conversation_lock(**_kwargs):
+    async def pause_during_conversation_processing(*_args, **_kwargs):
         conversation_has_lock.set()
         await release_conversation.wait()
+        return [], "Lock order test response"
 
     async def no_outbound(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(
         conversation_engine,
-        "ensure_private_chat_commands",
-        pause_after_conversation_lock,
+        "_service_menu",
+        pause_during_conversation_processing,
     )
     monkeypatch.setattr(conversation_engine, "_send_reply", no_outbound)
 
@@ -410,6 +411,137 @@ async def test_telegram_conversation_final_guard_rolls_back_pending_state(
                 )
             ) == 0
     finally:
+        async with original_factory() as cleanup:
+            async with cleanup.begin():
+                await cleanup.execute(
+                    text("DELETE FROM telegram_outbound_messages WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM background_jobs WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM telegram_conversation_messages WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM telegram_conversations WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM tenants WHERE id = :id"),
+                    {"id": tenant_id},
+                )
+
+
+
+@pytest.mark.asyncio
+async def test_telegram_deactivation_during_command_provisioning_discards_work(
+    monkeypatch,
+):
+    """A tenant deactivated during Telegram API setup is rejected before processing."""
+    tenant_id = uuid4()
+    conversation_id = uuid4()
+    message_id = uuid4()
+    chat_id = str(730000000 + (uuid4().int % 100000000))
+    original_factory = db.AsyncSessionFactory
+    provisioning_started = asyncio.Event()
+    release_provisioning = asyncio.Event()
+
+    async with original_factory() as setup:
+        async with setup.begin():
+            setup.add(
+                Tenant(
+                    id=tenant_id,
+                    name="ADM-012 provisioning lifecycle race",
+                    slug=f"adm012-provision-{uuid4().hex}",
+                    status="active",
+                    business_timezone="Africa/Lagos",
+                )
+            )
+            await setup.flush()
+            setup.add(
+                TelegramConversation(
+                    id=conversation_id,
+                    tenant_id=tenant_id,
+                    telegram_user_id=chat_id,
+                    telegram_chat_id=chat_id,
+                    customer_name="Provisioning Race Test",
+                    status="active",
+                    context={"booking": {"step": "before"}},
+                    last_inbound_at=datetime.now(UTC),
+                )
+            )
+            setup.add(
+                TelegramConversationMessage(
+                    id=message_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    provider_message_id=f"{chat_id}:1",
+                    direction="inbound",
+                    body_encrypted="encrypted-hello",
+                    delivery_status="received",
+                )
+            )
+
+    async def pause_during_external_provisioning(**_kwargs):
+        provisioning_started.set()
+        await release_provisioning.wait()
+
+    monkeypatch.setattr(
+        conversation_engine, "ensure_private_chat_commands",
+        pause_during_external_provisioning,
+    )
+    monkeypatch.setattr(
+        conversation_engine, "decrypt_telegram_secret",
+        lambda value: "test-platform-token" if value else "",
+    )
+    monkeypatch.setattr(
+        conversation_engine, "_send_reply",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Inactive tenant must not enqueue a Telegram reply"
+        ),
+    )
+
+    try:
+        task = asyncio.create_task(
+            conversation_engine.process_telegram_conversation_job(
+                ClaimedJob(
+                    id=uuid4(),
+                    tenant_id=tenant_id,
+                    job_type="telegram.process_conversation",
+                    payload={
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(message_id),
+                    },
+                    attempts=1,
+                    max_attempts=3,
+                )
+            )
+        )
+        await asyncio.wait_for(provisioning_started.wait(), timeout=5)
+
+        async with original_factory() as deactivate:
+            async with deactivate.begin():
+                tenant = await deactivate.get(Tenant, tenant_id)
+                assert tenant is not None
+                tenant.status = "deactivated"
+
+        release_provisioning.set()
+        await asyncio.wait_for(task, timeout=10)
+
+        async with original_factory() as verify:
+            conversation = await verify.get(TelegramConversation, conversation_id)
+            assert conversation is not None
+            assert conversation.context == {"booking": {"step": "before"}}
+            assert await verify.scalar(
+                select(func.count()).select_from(BackgroundJob).where(
+                    BackgroundJob.tenant_id == tenant_id
+                )
+            ) == 0
+    finally:
+        release_provisioning.set()
         async with original_factory() as cleanup:
             async with cleanup.begin():
                 await cleanup.execute(
