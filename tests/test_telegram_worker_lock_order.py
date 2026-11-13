@@ -290,3 +290,178 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
                     text("DELETE FROM tenants WHERE id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
+
+
+
+@pytest.mark.asyncio
+async def test_telegram_conversation_final_guard_rolls_back_pending_state(
+    monkeypatch,
+):
+    """A tenant becoming inactive at the final guard must discard all pending writes."""
+    from types import SimpleNamespace
+
+    from app.db import session as db_session
+
+    tenant_id = uuid4()
+    conversation_id = uuid4()
+    message_id = uuid4()
+    platform_bot_id = uuid4()
+    chat_id = str(720000000 + (uuid4().int % 100000000))
+    original_factory = db_session.AsyncSessionFactory
+
+    async with original_factory() as setup:
+        async with setup.begin():
+            setup.add(
+                Tenant(
+                    id=tenant_id,
+                    name="ADM-012 final-guard rollback",
+                    slug=f"adm012-final-{uuid4().hex}",
+                    status="active",
+                    business_timezone="Africa/Lagos",
+                )
+            )
+            await setup.flush()
+            setup.add(
+                TelegramPlatformBot(
+                    id=platform_bot_id,
+                    singleton_key="platform",
+                    bot_id="9016622451",
+                    bot_username="smeops_test_bot",
+                    bot_token_encrypted="encrypted-test-token",
+                    webhook_secret_hash="0" * 64,
+                    status="active",
+                )
+            )
+            setup.add(
+                TelegramConversation(
+                    id=conversation_id,
+                    tenant_id=tenant_id,
+                    telegram_user_id=chat_id,
+                    telegram_chat_id=chat_id,
+                    customer_name="Final Guard Test",
+                    status="active",
+                    context={"booking": {"step": "before"}},
+                    last_inbound_at=datetime.now(UTC),
+                )
+            )
+            setup.add(
+                TelegramConversationMessage(
+                    id=message_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    provider_message_id=f"{chat_id}:1",
+                    direction="inbound",
+                    body_encrypted="encrypted-hello",
+                    delivery_status="received",
+                )
+            )
+
+    class InactiveTenantResult:
+        @staticmethod
+        def scalar_one_or_none():
+            return SimpleNamespace(status="deactivated")
+
+    class SessionProxy:
+        def __init__(self, session):
+            self._session = session
+            self.tenant_lock_queries = 0
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        async def execute(self, statement, *args, **kwargs):
+            result = await self._session.execute(statement, *args, **kwargs)
+            sql = str(statement).lower()
+            if "from tenants" in sql and "for update" in sql:
+                self.tenant_lock_queries += 1
+                if self.tenant_lock_queries == 2:
+                    return InactiveTenantResult()
+            return result
+
+    class SessionContext:
+        def __init__(self):
+            self.session = original_factory()
+            self.proxy = SessionProxy(self.session)
+
+        async def __aenter__(self):
+            await self.session.__aenter__()
+            return self.proxy
+
+        async def __aexit__(self, *args):
+            return await self.session.__aexit__(*args)
+
+    monkeypatch.setattr(db_session, "AsyncSessionFactory", SessionContext)
+    monkeypatch.setattr(
+        conversation_engine,
+        "decrypt_telegram_secret",
+        lambda _value: "hello",
+    )
+
+    async def no_telegram_setup(**_kwargs):
+        return None
+
+    async def outbound_must_not_be_enqueued(**_kwargs):
+        pytest.fail("Final lifecycle guard must run before outbound enqueue")
+
+    monkeypatch.setattr(
+        conversation_engine,
+        "ensure_private_chat_commands",
+        no_telegram_setup,
+    )
+    monkeypatch.setattr(
+        conversation_engine,
+        "_send_reply",
+        outbound_must_not_be_enqueued,
+    )
+
+    try:
+        await conversation_engine.process_telegram_conversation_job(
+            ClaimedJob(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                job_type="telegram.process_conversation",
+                payload={
+                    "conversation_id": str(conversation_id),
+                    "message_id": str(message_id),
+                },
+                attempts=1,
+                max_attempts=3,
+            )
+        )
+
+        async with original_factory() as verify:
+            conversation = await verify.get(TelegramConversation, conversation_id)
+            assert conversation is not None
+            assert conversation.context == {"booking": {"step": "before"}}
+            assert await verify.scalar(
+                select(func.count()).select_from(BackgroundJob).where(
+                    BackgroundJob.tenant_id == tenant_id
+                )
+            ) == 0
+    finally:
+        async with original_factory() as cleanup:
+            async with cleanup.begin():
+                await cleanup.execute(
+                    text("DELETE FROM telegram_outbound_messages WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM background_jobs WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM telegram_conversation_messages WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM telegram_conversations WHERE tenant_id = :id"),
+                    {"id": tenant_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM telegram_platform_bots WHERE id = :id"),
+                    {"id": platform_bot_id},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM tenants WHERE id = :id"),
+                    {"id": tenant_id},
+                )
