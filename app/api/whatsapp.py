@@ -210,6 +210,21 @@ async def receive_whatsapp_webhook(
         if connection is None:
             continue
 
+        # Tenant is the lifecycle serialization mutex. Acquire it before
+        # persisting an event or enqueueing work so a concurrent deactivation
+        # either waits for this accepted delivery or wins and causes this
+        # delivery to be ignored. SELECT FOR UPDATE returns the committed row
+        # version after waiting under PostgreSQL READ COMMITTED.
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == connection.tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None or tenant.status != "active":
+            continue
+
         canonical_payload = json.dumps(
             event_payload,
             sort_keys=True,
