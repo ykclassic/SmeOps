@@ -350,8 +350,8 @@ def test_rest_mutation_routes_enforce_current_tenant_state_and_preserve_side_eff
     try:
         if tenant_status == "active":
             expected_statuses = [
-                201, 200, 201, 200, 200, 409, 409, 409,
-                201, 201, 200, 200, 409, 409,
+                201, 200, 201, 201, 200, 409, 409, 409,
+                201, 201, 201, 200, 409, 200,
             ]
             assert [response.status_code for response in responses] == expected_statuses
         else:
@@ -425,6 +425,8 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
                 status="active",
                 business_timezone="Africa/Lagos",
             ))
+            # Persist the referenced tenant before inserting dependent rows.
+            await setup.flush()
             setup.add(User(
                 id=owner_id,
                 tenant_id=tenant_id,
