@@ -70,10 +70,7 @@ jobs:
           alembic upgrade head
           python scripts/verify_tenant_status_migration.py verify
       - name: Lint
-        run: |
-          ruff check --fix .
-          git diff -- tests/test_whatsapp_webhook_lifecycle.py
-          ruff check .
+        run: ruff check .
       - name: Tests
         run: pytest
 
