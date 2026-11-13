@@ -1263,12 +1263,13 @@ async def process_channel_conversation_job(
                 await session.rollback()
                 raise ValueError("Telegram conversation tenant does not exist")
             if final_tenant.status != "active":
+                inactive_status = final_tenant.status
                 await session.rollback()
                 logger.info(
                     "Telegram conversation result discarded after tenant deactivation",
                     extra={
                         "tenant_id": str(job.tenant_id),
-                        "tenant_status": final_tenant.status,
+                        "tenant_status": inactive_status,
                     },
                 )
                 return
