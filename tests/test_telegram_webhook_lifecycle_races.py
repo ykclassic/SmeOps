@@ -14,11 +14,11 @@ from app.core.telegram import hash_telegram_webhook_secret
 from app.db.session import AsyncSessionFactory
 from app.models import (
     BackgroundJob,
-    Tenant,
     TelegramChatContext,
     TelegramConnection,
     TelegramPlatformBot,
     TelegramWebhookEvent,
+    Tenant,
 )
 
 
