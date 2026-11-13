@@ -288,7 +288,6 @@ async def test_telegram_conversation_final_guard_rolls_back_pending_state(
     tenant_id = uuid4()
     conversation_id = uuid4()
     message_id = uuid4()
-    platform_bot_id = uuid4()
     chat_id = str(720000000 + (uuid4().int % 100000000))
     original_factory = db_session.AsyncSessionFactory
 
