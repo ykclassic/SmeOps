@@ -56,7 +56,9 @@ def _set_status(tenant_id: str, value: str) -> None:
         async with AsyncSessionFactory() as session:
             async with session.begin():
                 await session.execute(
-                    update(Tenant).where(Tenant.id == UUID(tenant_id)).values(status=value)
+                    update(Tenant)
+                    .where(Tenant.id == UUID(tenant_id))
+                    .values(status=value)
                 )
 
     asyncio.run(update_status())
@@ -96,20 +98,74 @@ def _cleanup(tenant_id: str) -> None:
         async with AsyncSessionFactory() as session:
             async with session.begin():
                 # Remove rows with actor/creator references before users.
-                await session.execute(delete(AuditEvent).where(AuditEvent.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(TelegramOutboundMessage).where(TelegramOutboundMessage.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(TelegramOwnerNotification).where(TelegramOwnerNotification.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(WhatsAppOutboundMessage).where(WhatsAppOutboundMessage.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(BackgroundJob).where(BackgroundJob.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(Appointment).where(Appointment.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(OrderItem).where(OrderItem.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(Order).where(Order.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(BusinessHours).where(BusinessHours.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(Product).where(Product.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(Service).where(Service.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(Customer).where(Customer.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(User).where(User.tenant_id == UUID(tenant_id)))
-                await session.execute(delete(Tenant).where(Tenant.id == UUID(tenant_id)))
+                await session.execute(
+                    delete(AuditEvent).where(AuditEvent.tenant_id == UUID(tenant_id))
+                )
+                await session.execute(
+                    delete(TelegramOutboundMessage).where(
+                        TelegramOutboundMessage.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(TelegramOwnerNotification).where(
+                        TelegramOwnerNotification.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(WhatsAppOutboundMessage).where(
+                        WhatsAppOutboundMessage.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(BackgroundJob).where(
+                        BackgroundJob.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(Appointment).where(
+                        Appointment.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(OrderItem).where(
+                        OrderItem.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(Order).where(
+                        Order.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(BusinessHours).where(
+                        BusinessHours.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(Product).where(
+                        Product.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(Service).where(
+                        Service.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(Customer).where(
+                        Customer.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(User).where(
+                        User.tenant_id == UUID(tenant_id)
+                    )
+                )
+                await session.execute(
+                    delete(Tenant).where(
+                        Tenant.id == UUID(tenant_id)
+                    )
+                )
 
     asyncio.run(cleanup())
 
@@ -452,17 +508,45 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
     finally:
         async with AsyncSessionFactory() as cleanup:
             async with cleanup.begin():
-                await cleanup.execute(delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id))
-                await cleanup.execute(delete(TelegramOutboundMessage).where(TelegramOutboundMessage.tenant_id == tenant_id))
-                await cleanup.execute(delete(TelegramOwnerNotification).where(TelegramOwnerNotification.tenant_id == tenant_id))
-                await cleanup.execute(delete(WhatsAppOutboundMessage).where(WhatsAppOutboundMessage.tenant_id == tenant_id))
-                await cleanup.execute(delete(BackgroundJob).where(BackgroundJob.tenant_id == tenant_id))
-                await cleanup.execute(delete(Appointment).where(Appointment.tenant_id == tenant_id))
-                await cleanup.execute(delete(OrderItem).where(OrderItem.tenant_id == tenant_id))
-                await cleanup.execute(delete(Order).where(Order.tenant_id == tenant_id))
-                await cleanup.execute(delete(BusinessHours).where(BusinessHours.tenant_id == tenant_id))
-                await cleanup.execute(delete(Product).where(Product.tenant_id == tenant_id))
-                await cleanup.execute(delete(Service).where(Service.tenant_id == tenant_id))
-                await cleanup.execute(delete(Customer).where(Customer.tenant_id == tenant_id))
-                await cleanup.execute(delete(User).where(User.tenant_id == tenant_id))
-                await cleanup.execute(delete(Tenant).where(Tenant.id == tenant_id))
+                await cleanup.execute(
+                    delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(TelegramOutboundMessage).where(TelegramOutboundMessage.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(TelegramOwnerNotification).where(TelegramOwnerNotification.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(WhatsAppOutboundMessage).where(WhatsAppOutboundMessage.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(BackgroundJob).where(BackgroundJob.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(Appointment).where(Appointment.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(OrderItem).where(OrderItem.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(Order).where(Order.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(BusinessHours).where(BusinessHours.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(Product).where(Product.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(Service).where(Service.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(Customer).where(Customer.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(User).where(User.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(Tenant).where(Tenant.id == tenant_id)
+                )
