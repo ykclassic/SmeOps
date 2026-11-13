@@ -340,6 +340,7 @@ def test_platform_webhook_does_not_acknowledge_event_insert_failure(
         _platform_bot(),
         None,
         context,
+        SimpleNamespace(status="active"),
         flush_error=RuntimeError("simulated event insert failure"),
     )
     monkeypatch.setattr(telegram_api, "encrypt_telegram_secret", lambda _value: "encrypted")
