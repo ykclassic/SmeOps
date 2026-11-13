@@ -14,7 +14,6 @@ from app.models import (
     WhatsAppConnection,
     WhatsAppWebhookEvent,
 )
-
 import pytest
 from sqlalchemy import select, text
 from starlette.requests import Request
