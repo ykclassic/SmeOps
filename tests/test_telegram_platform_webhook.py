@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -27,6 +28,10 @@ class FakeNested:
 
 
 class FakePlatformSession:
+    @property
+    def no_autoflush(self):
+        return nullcontext()
+
     def __init__(self, *results, commit_error=None, flush_error=None):
         self.results = list(results)
         self.events = []
@@ -143,7 +148,7 @@ def test_platform_webhook_returns_duplicate_only_for_existing_event():
 def test_platform_webhook_commits_event_and_job_before_acknowledging(monkeypatch):
     tenant_id = uuid4()
     context = SimpleNamespace(tenant_id=tenant_id)
-    session = FakePlatformSession(_platform_bot(), None, context)
+    session = FakePlatformSession(_platform_bot(), None, context, SimpleNamespace(status="active"))
     job_id = uuid4()
     queued = []
 
@@ -180,6 +185,7 @@ def test_platform_webhook_never_returns_200_when_persistence_fails(
         _platform_bot(),
         None,
         context,
+        SimpleNamespace(status="active"),
         commit_error=RuntimeError("simulated database commit failure")
         if failure_point == "commit"
         else None,
