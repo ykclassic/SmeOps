@@ -1253,7 +1253,10 @@ async def process_channel_conversation_job(
             # autoflush before this lock is acquired.
             with session.no_autoflush:
                 final_tenant_result = await session.execute(
-                    select(Tenant).where(Tenant.id == job.tenant_id).with_for_update()
+                    select(Tenant)
+                    .where(Tenant.id == job.tenant_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             final_tenant = final_tenant_result.scalar_one_or_none()
             if final_tenant is None:
