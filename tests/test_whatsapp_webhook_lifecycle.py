@@ -266,3 +266,89 @@ async def test_mixed_tenant_webhook_payload_only_queues_active_tenant_events():
         assert len(active_jobs.scalars().all()) == 1
         assert suspended_events.scalars().all() == []
         assert suspended_jobs.scalars().all() == []
+
+class _TenantLockBarrierSession:
+    def __init__(self, session, barrier: asyncio.Barrier):
+        self._session = session
+        self._barrier = barrier
+
+    async def execute(self, statement, *args, **kwargs):
+        statement_sql = str(statement).lower()
+        if "for update" in statement_sql and "tenants" in statement_sql:
+            await self._barrier.wait()
+        return await self._session.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+
+def _multi_tenant_payload(phone_number_ids: list[str], delivery_id: str) -> dict:
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "metadata": {"phone_number_id": phone_number_id},
+                            "messages": [
+                                {
+                                    "from": "2348012345678",
+                                    "id": f"wamid.{delivery_id}.{uuid4().hex}",
+                                    "timestamp": "1793433600",
+                                    "type": "text",
+                                    "text": {"body": "BOOK"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+            for phone_number_id in phone_number_ids
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mixed_tenant_batches_lock_tenants_in_stable_order():
+    tenant_a, phone_a = await _create_tenant("active")
+    tenant_b, phone_b = await _create_tenant("active")
+    barrier = asyncio.Barrier(2)
+
+    async with AsyncSessionFactory() as session_one:
+        async with AsyncSessionFactory() as session_two:
+            responses = await asyncio.wait_for(
+                asyncio.gather(
+                    receive_whatsapp_webhook(
+                        _signed_request(_multi_tenant_payload([phone_a, phone_b], "one")),
+                        _TenantLockBarrierSession(session_one, barrier),
+                    ),
+                    receive_whatsapp_webhook(
+                        _signed_request(_multi_tenant_payload([phone_b, phone_a], "two")),
+                        _TenantLockBarrierSession(session_two, barrier),
+                    ),
+                ),
+                timeout=10,
+            )
+
+    assert responses == [
+        {"status": "accepted", "queued_events": 2},
+        {"status": "accepted", "queued_events": 2},
+    ]
+
+    async with AsyncSessionFactory() as session:
+        for tenant in (tenant_a, tenant_b):
+            events = await session.execute(
+                select(WhatsAppWebhookEvent).where(
+                    WhatsAppWebhookEvent.tenant_id == tenant.id
+                )
+            )
+            jobs = await session.execute(
+                select(BackgroundJob).where(
+                    BackgroundJob.tenant_id == tenant.id,
+                    BackgroundJob.job_type == "whatsapp.accept_inbound",
+                )
+            )
+            assert len(events.scalars().all()) == 2
+            assert len(jobs.scalars().all()) == 2
+
