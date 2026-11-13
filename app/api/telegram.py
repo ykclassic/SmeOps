@@ -254,13 +254,6 @@ async def receive_platform_telegram_webhook(
             if booking_ref is not None:
                 tenant_id = booking_ref.tenant_id
                 booking_reference_resolved = True
-                context_result = await session.execute(
-                    select(TelegramChatContext).where(
-                        TelegramChatContext.platform_bot_id == platform_bot.id,
-                        TelegramChatContext.telegram_chat_id == str(chat_id),
-                    ).with_for_update()
-                )
-                booking_chat_context = context_result.scalar_one_or_none()
     if is_start_command and tenant_id is None:
         logger.info(
             "Telegram platform webhook ignored",
@@ -292,6 +285,17 @@ async def receive_platform_telegram_webhook(
             extra={**update_context, "outcome": "ignored", "reason": "tenant_inactive"},
         )
         return {"status": "ignored", "queued_events": 0}
+
+    if booking_reference_resolved:
+        # Acquire the tenant mutex before locking or changing chat context. This
+        # keeps the lock order tenant -> chat context across Telegram ingress.
+        context_result = await session.execute(
+            select(TelegramChatContext).where(
+                TelegramChatContext.platform_bot_id == platform_bot.id,
+                TelegramChatContext.telegram_chat_id == str(chat_id),
+            ).with_for_update()
+        )
+        booking_chat_context = context_result.scalar_one_or_none()
 
     if booking_reference_resolved and booking_chat_context is not None:
         booking_chat_context.tenant_id = tenant_id
