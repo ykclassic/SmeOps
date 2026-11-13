@@ -16,6 +16,7 @@ from app.models import (
     TelegramConversationMessage,
     TelegramOwnerLink,
     TelegramWebhookEvent,
+    Tenant,
 )
 
 logger = logging.getLogger(__name__)
@@ -238,6 +239,13 @@ async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
         raise ValueError("Invalid Telegram webhook job payload") from exc
 
     async with AsyncSessionFactory() as session:
+        tenant_result = await session.execute(
+            select(Tenant).where(Tenant.id == job.tenant_id).with_for_update()
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise ValueError("Telegram webhook tenant no longer exists")
+
         result = await session.execute(
             select(TelegramWebhookEvent)
             .where(
@@ -253,6 +261,21 @@ async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
             return
         if event.status != "queued":
             raise ValueError("Telegram webhook event is not processable")
+        if tenant.status != "active":
+            # Consume the durable event without creating a conversation or
+            # downstream job. This prevents retries from reviving old updates.
+            event.status = "processed"
+            event.processed_at = datetime.now(UTC)
+            await session.commit()
+            logger.info(
+                "Telegram inbound event discarded for inactive tenant",
+                extra={
+                    "tenant_id": str(job.tenant_id),
+                    "event_id": str(event.id),
+                    "tenant_status": tenant.status,
+                },
+            )
+            return
 
         payload = json.loads(decrypt_telegram_secret(event.payload_encrypted))
         owner_link_message = await _consume_owner_link(
