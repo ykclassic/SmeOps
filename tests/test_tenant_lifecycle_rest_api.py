@@ -388,15 +388,15 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
                         assert user is not None
                         started.set()
                         if operation == "appointment_create":
-                                from app.api.business import create_appointment
+                            from app.api.business import create_appointment
 
-                                payload = AppointmentCreate(
-                                    idempotency_key=uuid4(),
-                                    service_id=service_id,
-                                    customer_name="REST lock customer",
-                                    customer_phone="+2348012345678",
-                                    starts_at=local_start,
-                                )
+                            payload = AppointmentCreate(
+                                idempotency_key=uuid4(),
+                                service_id=service_id,
+                                customer_name="REST lock customer",
+                                customer_phone="+2348012345678",
+                                starts_at=local_start,
+                            )
                             return await create_appointment(payload, request_session, user)
 
                         from app.api.retail import create_order
