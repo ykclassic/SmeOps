@@ -68,6 +68,7 @@ def _tenant_snapshot(tenant_id: str) -> dict[str, int]:
     models = (
         Appointment,
         Order,
+        OrderItem,
         Product,
         Customer,
         Service,
@@ -88,6 +89,24 @@ def _tenant_snapshot(tenant_id: str) -> dict[str, int]:
                         model.tenant_id == UUID(tenant_id)
                     )
                 )
+            for model, states in (
+                (Appointment, ("confirmed", "cancelled", "completed", "missed")),
+                (Order, ("pending_approval", "approved", "cancelled", "fulfilled")),
+            ):
+                for state in states:
+                    counts[f"{model.__tablename__}:{state}"] = await session.scalar(
+                        select(func.count())
+                        .select_from(model)
+                        .where(
+                            model.tenant_id == UUID(tenant_id),
+                            model.status == state,
+                        )
+                    )
+            counts["product_stock_total"] = await session.scalar(
+                select(func.coalesce(func.sum(Product.stock_quantity), 0)).where(
+                    Product.tenant_id == UUID(tenant_id)
+                )
+            )
             return counts
 
     return asyncio.run(read())
