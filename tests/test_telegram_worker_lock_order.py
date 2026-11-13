@@ -159,7 +159,7 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
         conversation_has_lock.set()
         await release_conversation.wait()
 
-    async def no_outbound(**_kwargs):
+    async def no_outbound(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(
@@ -371,7 +371,7 @@ async def test_telegram_conversation_final_guard_rolls_back_pending_state(
     async def no_telegram_setup(**_kwargs):
         return None
 
-    async def outbound_must_not_be_enqueued(**_kwargs):
+    async def outbound_must_not_be_enqueued(*_args, **_kwargs):
         pytest.fail("Final lifecycle guard must run before outbound enqueue")
 
     monkeypatch.setattr(
