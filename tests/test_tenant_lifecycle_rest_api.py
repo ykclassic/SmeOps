@@ -531,6 +531,63 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
                     AuditEvent.event_type.in_(["appointment.created", "order.created"]),
                 )
             ) == 0
+            if operation == "appointment_create":
+                # A rejected appointment must not enqueue worker or outbound
+                # notification side effects after the tenant is deactivated.
+                assert await verify.scalar(
+                    select(func.count()).select_from(BackgroundJob).where(
+                        BackgroundJob.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(TelegramOutboundMessage).where(
+                        TelegramOutboundMessage.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(TelegramOwnerNotification).where(
+                        TelegramOwnerNotification.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(WhatsAppOutboundMessage).where(
+                        WhatsAppOutboundMessage.tenant_id == tenant_id
+                    )
+                ) == 0
+            else:
+                # A rejected retail order must not consume inventory or create
+                # order-line/worker/outbound side effects.
+                assert await verify.scalar(
+                    select(Product.stock_quantity).where(
+                        Product.tenant_id == tenant_id,
+                        Product.id == product_id,
+                    )
+                ) == 5
+                assert await verify.scalar(
+                    select(func.count()).select_from(OrderItem).where(
+                        OrderItem.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(BackgroundJob).where(
+                        BackgroundJob.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(TelegramOutboundMessage).where(
+                        TelegramOutboundMessage.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(TelegramOwnerNotification).where(
+                        TelegramOwnerNotification.tenant_id == tenant_id
+                    )
+                ) == 0
+                assert await verify.scalar(
+                    select(func.count()).select_from(WhatsAppOutboundMessage).where(
+                        WhatsAppOutboundMessage.tenant_id == tenant_id
+                    )
+                ) == 0
     finally:
         async with AsyncSessionFactory() as cleanup:
             async with cleanup.begin():
