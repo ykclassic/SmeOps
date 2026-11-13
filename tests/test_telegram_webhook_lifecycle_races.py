@@ -77,7 +77,6 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
     route_kind: str,
 ):
     tenant_id = uuid4()
-    platform_bot_id = uuid4()
     chat_id = str(810000000 + (uuid4().int % 100000000))
     secret = "adm012-webhook-secret"
     platform_bot_identifier = "9016622451"
@@ -95,19 +94,14 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
                 )
             )
             await setup.flush()
-            setup.add(
-                TelegramPlatformBot(
-                    id=platform_bot_id,
-                    singleton_key="platform",
-                    bot_id=platform_bot_identifier,
-                    bot_username="smeops_test_bot",
-                    bot_token_encrypted="encrypted-test-token",
-                    webhook_secret_hash=hash_telegram_webhook_secret(secret),
-                    status="active",
+            platform_bot = await setup.scalar(
+                select(TelegramPlatformBot).where(
+                    TelegramPlatformBot.singleton_key == "platform"
                 )
             )
-            # Persist the referenced platform bot before inserting its chat context.
-            await setup.flush()
+            assert platform_bot is not None
+            platform_bot_id = platform_bot.id
+            platform_bot.webhook_secret_hash = hash_telegram_webhook_secret(secret)
             setup.add(
                 TelegramChatContext(
                     platform_bot_id=platform_bot_id,
@@ -223,10 +217,6 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
                 await cleanup.execute(
                     text("DELETE FROM telegram_connections WHERE tenant_id = :id"),
                     {"id": tenant_id},
-                )
-                await cleanup.execute(
-                    text("DELETE FROM telegram_platform_bots WHERE id = :id"),
-                    {"id": platform_bot_id},
                 )
                 await cleanup.execute(
                     text("DELETE FROM tenants WHERE id = :id"),
