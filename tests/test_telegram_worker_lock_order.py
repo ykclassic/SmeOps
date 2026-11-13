@@ -13,7 +13,6 @@ from app.models import (
     BackgroundJob,
     TelegramConversation,
     TelegramConversationMessage,
-    TelegramPlatformBot,
     TelegramWebhookEvent,
     Tenant,
 )
@@ -45,7 +44,6 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
     conversation_id = uuid4()
     initial_message_id = uuid4()
     event_id = uuid4()
-    platform_bot_id = uuid4()
     chat_id = str(700000000 + (uuid4().int % 100000000))
 
     async with db.AsyncSessionFactory() as setup:
@@ -60,17 +58,6 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
                 )
             )
             await setup.flush()
-            setup.add(
-                TelegramPlatformBot(
-                    id=platform_bot_id,
-                    singleton_key="platform",
-                    bot_id="9016622451",
-                    bot_username="smeops_test_bot",
-                    bot_token_encrypted="encrypted-test-token",
-                    webhook_secret_hash="0" * 64,
-                    status="active",
-                )
-            )
             setup.add(
                 TelegramConversation(
                     id=conversation_id,
@@ -283,10 +270,6 @@ async def test_telegram_inbound_and_conversation_workers_use_tenant_first_lock_o
                     {"tenant_id": tenant_id},
                 )
                 await cleanup.execute(
-                    text("DELETE FROM telegram_platform_bots WHERE id = :bot_id"),
-                    {"bot_id": platform_bot_id},
-                )
-                await cleanup.execute(
                     text("DELETE FROM tenants WHERE id = :tenant_id"),
                     {"tenant_id": tenant_id},
                 )
@@ -321,17 +304,6 @@ async def test_telegram_conversation_final_guard_rolls_back_pending_state(
                 )
             )
             await setup.flush()
-            setup.add(
-                TelegramPlatformBot(
-                    id=platform_bot_id,
-                    singleton_key="platform",
-                    bot_id="9016622451",
-                    bot_username="smeops_test_bot",
-                    bot_token_encrypted="encrypted-test-token",
-                    webhook_secret_hash="0" * 64,
-                    status="active",
-                )
-            )
             setup.add(
                 TelegramConversation(
                     id=conversation_id,
@@ -456,10 +428,6 @@ async def test_telegram_conversation_final_guard_rolls_back_pending_state(
                 await cleanup.execute(
                     text("DELETE FROM telegram_conversations WHERE tenant_id = :id"),
                     {"id": tenant_id},
-                )
-                await cleanup.execute(
-                    text("DELETE FROM telegram_platform_bots WHERE id = :id"),
-                    {"id": platform_bot_id},
                 )
                 await cleanup.execute(
                     text("DELETE FROM tenants WHERE id = :id"),
