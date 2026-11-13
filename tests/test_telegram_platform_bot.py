@@ -130,7 +130,7 @@ def test_invalid_booking_reference_never_falls_back_to_existing_chat_context():
     assert not session.committed
 
 
-def test_inactive_tenant_booking_link_is_ignored_without_switching_chat_context():
+def test_inactive_tenant_booking_link_is_ignored_without_switching_chat_context(monkeypatch):
     tenant_id = uuid4()
     bot = platform_bot()
     reference = SimpleNamespace(tenant_id=tenant_id)
@@ -141,6 +141,7 @@ def test_inactive_tenant_booking_link_is_ignored_without_switching_chat_context(
     async def enqueue(_session, **kwargs):
         jobs.append(kwargs)
 
+    monkeypatch.setattr(telegram_api, "enqueue_job", enqueue)
     with client_for(session) as client:
         response = client.post(
             "/webhooks/telegram/platform",
