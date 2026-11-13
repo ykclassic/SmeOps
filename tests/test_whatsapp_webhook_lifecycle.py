@@ -63,7 +63,7 @@ def _signed_request(payload: dict) -> Request:
     )
 
 
-def _payload(message_id: str) -> dict:
+def _payload(message_id: str, phone_number_id: str = PHONE_NUMBER_ID) -> dict:
     return {
         "object": "whatsapp_business_account",
         "entry": [
@@ -71,7 +71,7 @@ def _payload(message_id: str) -> dict:
                 "changes": [
                     {
                         "value": {
-                            "metadata": {"phone_number_id": PHONE_NUMBER_ID},
+                            "metadata": {"phone_number_id": phone_number_id},
                             "messages": [
                                 {
                                     "from": "2348012345678",
@@ -89,7 +89,7 @@ def _payload(message_id: str) -> dict:
     }
 
 
-async def _create_tenant(status: str = "active") -> Tenant:
+async def _create_tenant(status: str = "active") -> tuple[Tenant, str]:
     tenant = Tenant(
         id=uuid4(),
         name="ADM-013 WhatsApp lifecycle test",
@@ -97,9 +97,10 @@ async def _create_tenant(status: str = "active") -> Tenant:
         business_timezone="Africa/Lagos",
         status=status,
     )
+    phone_number_id = f"{uuid4().int % 10**11:011d}"
     connection = WhatsAppConnection(
         tenant_id=tenant.id,
-        phone_number_id=PHONE_NUMBER_ID,
+        phone_number_id=phone_number_id,
         business_account_id=f"{uuid4().int % 10**11:011d}",
         access_token_encrypted=encrypt_whatsapp_secret("adm-013-test-access-token"),
         status="active",
@@ -107,7 +108,7 @@ async def _create_tenant(status: str = "active") -> Tenant:
     async with AsyncSessionFactory() as session:
         session.add_all([tenant, connection])
         await session.commit()
-    return tenant
+    return tenant, phone_number_id
 
 
 @pytest.mark.asyncio
@@ -115,10 +116,10 @@ async def _create_tenant(status: str = "active") -> Tenant:
 async def test_inactive_tenant_webhook_is_acknowledged_without_event_or_job(
     tenant_status: str,
 ):
-    tenant = await _create_tenant(tenant_status)
+    tenant, phone_number_id = await _create_tenant(tenant_status)
     async with AsyncSessionFactory() as session:
         response = await receive_whatsapp_webhook(
-            _signed_request(_payload(f"wamid.{uuid4().hex}")),
+            _signed_request(_payload(f"wamid.{uuid4().hex}", phone_number_id)),
             session,
         )
         await session.commit()
@@ -142,7 +143,7 @@ async def test_inactive_tenant_webhook_is_acknowledged_without_event_or_job(
 
 @pytest.mark.asyncio
 async def test_webhook_waits_for_tenant_lifecycle_lock_and_rechecks_committed_state():
-    tenant = await _create_tenant("active")
+    tenant, phone_number_id = await _create_tenant("active")
     message_id = f"wamid.{uuid4().hex}"
 
     async with AsyncSessionFactory() as lifecycle_session:
@@ -156,7 +157,7 @@ async def test_webhook_waits_for_tenant_lifecycle_lock_and_rechecks_committed_st
             )
             webhook_task = asyncio.create_task(
                 receive_whatsapp_webhook(
-                    _signed_request(_payload(message_id)),
+                    _signed_request(_payload(message_id, phone_number_id)),
                     webhook_session,
                 )
             )
@@ -198,3 +199,66 @@ async def test_webhook_waits_for_tenant_lifecycle_lock_and_rechecks_committed_st
         )
         assert events.scalars().all() == []
         assert jobs.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_mixed_tenant_webhook_payload_only_queues_active_tenant_events():
+    active_tenant, active_phone = await _create_tenant("active")
+    suspended_tenant, suspended_phone = await _create_tenant("suspended")
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "metadata": {"phone_number_id": phone_id},
+                            "messages": [
+                                {
+                                    "from": "2348012345678",
+                                    "id": f"wamid.{uuid4().hex}",
+                                    "timestamp": "1793433600",
+                                    "type": "text",
+                                    "text": {"body": "BOOK"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+            for phone_id in (active_phone, suspended_phone)
+        ],
+    }
+
+    async with AsyncSessionFactory() as session:
+        response = await receive_whatsapp_webhook(_signed_request(payload), session)
+        await session.commit()
+
+    assert response == {"status": "accepted", "queued_events": 1}
+    async with AsyncSessionFactory() as session:
+        active_events = await session.execute(
+            select(WhatsAppWebhookEvent).where(
+                WhatsAppWebhookEvent.tenant_id == active_tenant.id
+            )
+        )
+        suspended_events = await session.execute(
+            select(WhatsAppWebhookEvent).where(
+                WhatsAppWebhookEvent.tenant_id == suspended_tenant.id
+            )
+        )
+        active_jobs = await session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.tenant_id == active_tenant.id,
+                BackgroundJob.job_type == "whatsapp.accept_inbound",
+            )
+        )
+        suspended_jobs = await session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.tenant_id == suspended_tenant.id,
+                BackgroundJob.job_type == "whatsapp.accept_inbound",
+            )
+        )
+        assert len(active_events.scalars().all()) == 1
+        assert len(active_jobs.scalars().all()) == 1
+        assert suspended_events.scalars().all() == []
+        assert suspended_jobs.scalars().all() == []
