@@ -79,7 +79,6 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
     tenant_id = uuid4()
     chat_id = str(810000000 + (uuid4().int % 100000000))
     secret = "adm012-webhook-secret"
-    platform_bot_identifier = "9016622451"
     legacy_bot_identifier = "9016622452"
 
     async with AsyncSessionFactory() as setup:
