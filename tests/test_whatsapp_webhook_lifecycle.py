@@ -19,7 +19,6 @@ from app.models import (
     WhatsAppWebhookEvent,
 )
 
-
 APP_SECRET = "adm-013-test-whatsapp-secret"
 ENCRYPTION_KEY = "c21lb3BzLWNpLXdoYXRzYXBwLWZlcm5ldC1rZXktMzI="
 PHONE_NUMBER_ID = "12345678901"
