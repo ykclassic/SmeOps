@@ -1,12 +1,18 @@
+import asyncio
 from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import delete, text
 
+from app.api.telegram import _lock_active_telegram_tenant
+from app.db.session import AsyncSessionFactory
 from app.jobs import telegram as telegram_jobs
 from app.jobs.queue import ClaimedJob
+from app.models import AuditEvent, Tenant, User
 from app.services import conversation_engine
+from app.services.tenant_lifecycle import transition_tenant_lifecycle
 
 
 class Result:
@@ -54,6 +60,94 @@ def _job(tenant_id, event_id=None):
         attempts=1,
         max_attempts=3,
     )
+
+
+
+async def _wait_for_postgres_blocker(waiting_pid, blocking_pid):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5
+    while loop.time() < deadline:
+        async with AsyncSessionFactory() as observer:
+            blockers = await observer.scalar(
+                text("SELECT pg_blocking_pids(:pid)"),
+                {"pid": waiting_pid},
+            )
+        if blocking_pid in (blockers or []):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(
+        f"PostgreSQL did not report backend {waiting_pid} blocked by {blocking_pid}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_telegram_ingress_waits_for_deactivation_lock_and_rechecks_state():
+    tenant_id = uuid4()
+    owner_id = uuid4()
+    async with AsyncSessionFactory() as setup:
+        async with setup.begin():
+            setup.add(
+                Tenant(
+                    id=tenant_id,
+                    name="ADM-012 Telegram lock test",
+                    slug=f"adm012-tg-lock-{uuid4().hex}",
+                    status="active",
+                )
+            )
+            await setup.flush()
+            setup.add(
+                User(
+                    id=owner_id,
+                    tenant_id=tenant_id,
+                    email=f"{owner_id.hex}@example.test",
+                    password_hash="test-only-hash",
+                    role="owner",
+                    status="active",
+                )
+            )
+
+    try:
+        async with AsyncSessionFactory() as lifecycle_session:
+            async with lifecycle_session.begin():
+                lifecycle_pid = await lifecycle_session.scalar(
+                    text("SELECT pg_backend_pid()")
+                )
+                await transition_tenant_lifecycle(
+                    lifecycle_session,
+                    tenant_id=tenant_id,
+                    actor_user_id=owner_id,
+                    target_status="deactivated",
+                )
+                started = asyncio.Event()
+                request_pid = None
+
+                async def attempt_ingress():
+                    nonlocal request_pid
+                    async with AsyncSessionFactory() as request_session:
+                        request_pid = await request_session.scalar(
+                            text("SELECT pg_backend_pid()")
+                        )
+                        started.set()
+                        return await _lock_active_telegram_tenant(
+                            request_session,
+                            tenant_id,
+                        )
+
+                task = asyncio.create_task(attempt_ingress())
+                await asyncio.wait_for(started.wait(), timeout=2)
+                assert request_pid is not None
+                await _wait_for_postgres_blocker(request_pid, lifecycle_pid)
+                assert not task.done()
+
+            assert await task is False
+    finally:
+        async with AsyncSessionFactory() as cleanup:
+            async with cleanup.begin():
+                await cleanup.execute(
+                    delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id)
+                )
+                await cleanup.execute(delete(User).where(User.tenant_id == tenant_id))
+                await cleanup.execute(delete(Tenant).where(Tenant.id == tenant_id))
 
 
 @pytest.mark.asyncio
