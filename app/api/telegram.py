@@ -229,6 +229,7 @@ async def receive_platform_telegram_webhook(
         parts = text_body.split(maxsplit=1)
         token = parts[1].strip() if len(parts) == 2 else ""
     booking_chat_context = None
+    booking_reference_resolved = False
     if token and len(token) <= 64:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         owner_result = await session.execute(
@@ -252,6 +253,7 @@ async def receive_platform_telegram_webhook(
             booking_ref = booking_result.scalar_one_or_none()
             if booking_ref is not None:
                 tenant_id = booking_ref.tenant_id
+                booking_reference_resolved = True
                 context_result = await session.execute(
                     select(TelegramChatContext).where(
                         TelegramChatContext.platform_bot_id == platform_bot.id,
@@ -291,13 +293,12 @@ async def receive_platform_telegram_webhook(
         )
         return {"status": "ignored", "queued_events": 0}
 
-    if is_start_command and token and booking_chat_context is not None:
+    if booking_reference_resolved and booking_chat_context is not None:
         booking_chat_context.tenant_id = tenant_id
         booking_chat_context.telegram_user_id = str(sender_id)
         booking_chat_context.selected_at = datetime.now(UTC)
         session.add(booking_chat_context)
-    elif is_start_command and token and booking_chat_context is None:
-        booking_reference_token = token
+    elif booking_reference_resolved and booking_chat_context is None:
         # A booking reference was resolved above; create the chat selection only
         # after the active-tenant lock has been acquired.
         booking_chat_context = TelegramChatContext(
