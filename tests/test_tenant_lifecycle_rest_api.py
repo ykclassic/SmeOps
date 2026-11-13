@@ -17,6 +17,7 @@ from app.models import (
     BusinessHours,
     Customer,
     Order,
+    OrderItem,
     Product,
     Service,
     TelegramOutboundMessage,
@@ -96,8 +97,17 @@ def _cleanup(tenant_id: str) -> None:
             async with session.begin():
                 # Remove rows with actor/creator references before users.
                 await session.execute(delete(AuditEvent).where(AuditEvent.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(TelegramOutboundMessage).where(TelegramOutboundMessage.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(TelegramOwnerNotification).where(TelegramOwnerNotification.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(WhatsAppOutboundMessage).where(WhatsAppOutboundMessage.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(BackgroundJob).where(BackgroundJob.tenant_id == UUID(tenant_id)))
                 await session.execute(delete(Appointment).where(Appointment.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(OrderItem).where(OrderItem.tenant_id == UUID(tenant_id)))
                 await session.execute(delete(Order).where(Order.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(BusinessHours).where(BusinessHours.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(Product).where(Product.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(Service).where(Service.tenant_id == UUID(tenant_id)))
+                await session.execute(delete(Customer).where(Customer.tenant_id == UUID(tenant_id)))
                 await session.execute(delete(User).where(User.tenant_id == UUID(tenant_id)))
                 await session.execute(delete(Tenant).where(Tenant.id == UUID(tenant_id)))
 
@@ -259,7 +269,11 @@ def test_rest_mutation_routes_enforce_current_tenant_state_and_preserve_side_eff
 
     try:
         if tenant_status == "active":
-            assert all(response.status_code != 401 for response in responses)
+            expected_statuses = [
+                201, 200, 201, 200, 200, 409, 409, 409,
+                201, 201, 200, 200, 409, 409,
+            ]
+            assert [response.status_code for response in responses] == expected_statuses
         else:
             assert [response.status_code for response in responses] == [401] * len(responses)
             assert _tenant_snapshot(tenant_id) == before
@@ -439,7 +453,16 @@ async def test_rest_create_operation_waits_for_deactivation_tenant_lock(operatio
         async with AsyncSessionFactory() as cleanup:
             async with cleanup.begin():
                 await cleanup.execute(delete(AuditEvent).where(AuditEvent.tenant_id == tenant_id))
+                await cleanup.execute(delete(TelegramOutboundMessage).where(TelegramOutboundMessage.tenant_id == tenant_id))
+                await cleanup.execute(delete(TelegramOwnerNotification).where(TelegramOwnerNotification.tenant_id == tenant_id))
+                await cleanup.execute(delete(WhatsAppOutboundMessage).where(WhatsAppOutboundMessage.tenant_id == tenant_id))
+                await cleanup.execute(delete(BackgroundJob).where(BackgroundJob.tenant_id == tenant_id))
                 await cleanup.execute(delete(Appointment).where(Appointment.tenant_id == tenant_id))
+                await cleanup.execute(delete(OrderItem).where(OrderItem.tenant_id == tenant_id))
                 await cleanup.execute(delete(Order).where(Order.tenant_id == tenant_id))
+                await cleanup.execute(delete(BusinessHours).where(BusinessHours.tenant_id == tenant_id))
+                await cleanup.execute(delete(Product).where(Product.tenant_id == tenant_id))
+                await cleanup.execute(delete(Service).where(Service.tenant_id == tenant_id))
+                await cleanup.execute(delete(Customer).where(Customer.tenant_id == tenant_id))
                 await cleanup.execute(delete(User).where(User.tenant_id == tenant_id))
                 await cleanup.execute(delete(Tenant).where(Tenant.id == tenant_id))
