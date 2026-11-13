@@ -264,6 +264,7 @@ async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
         if tenant.status != "active":
             # Consume the durable event without creating a conversation or
             # downstream job. This prevents retries from reviving old updates.
+            inactive_status = tenant.status
             event.status = "processed"
             event.processed_at = datetime.now(UTC)
             await session.commit()
@@ -272,7 +273,7 @@ async def accept_inbound_telegram_job(job: ClaimedJob) -> None:
                 extra={
                     "tenant_id": str(job.tenant_id),
                     "event_id": str(event.id),
-                    "tenant_status": tenant.status,
+                    "tenant_status": inactive_status,
                 },
             )
             return
