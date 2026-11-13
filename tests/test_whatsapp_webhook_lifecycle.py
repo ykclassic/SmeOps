@@ -4,6 +4,7 @@ import hmac
 import json
 from uuid import uuid4
 
+import pytest
 from app.api.whatsapp import receive_whatsapp_webhook
 from app.core.config import get_settings
 from app.core.whatsapp import encrypt_whatsapp_secret
@@ -14,7 +15,6 @@ from app.models import (
     WhatsAppConnection,
     WhatsAppWebhookEvent,
 )
-import pytest
 from sqlalchemy import select, text
 from starlette.requests import Request
 
