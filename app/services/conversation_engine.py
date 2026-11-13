@@ -287,8 +287,14 @@ async def process_channel_conversation_job(
 
     async with AsyncSessionFactory() as session:
         if channel == "telegram":
+            # Keep Telegram worker lock order consistent: tenant first, then
+            # TelegramConversation. Inbound ingestion holds the tenant mutex
+            # before locking/creating a conversation, so reversing this order
+            # here can deadlock concurrent inbound and conversation workers.
             lifecycle_result = await session.execute(
-                select(Tenant).where(Tenant.id == job.tenant_id)
+                select(Tenant)
+                .where(Tenant.id == job.tenant_id)
+                .with_for_update()
             )
             lifecycle_tenant = lifecycle_result.scalar_one_or_none()
             if lifecycle_tenant is None:
