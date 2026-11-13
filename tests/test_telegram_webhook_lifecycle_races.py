@@ -106,6 +106,8 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
                     status="active",
                 )
             )
+            # Persist the referenced platform bot before inserting its chat context.
+            await setup.flush()
             setup.add(
                 TelegramChatContext(
                     platform_bot_id=platform_bot_id,
