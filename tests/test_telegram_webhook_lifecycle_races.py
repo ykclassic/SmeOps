@@ -6,6 +6,10 @@ import pytest
 from sqlalchemy import func, select, text
 from starlette.requests import Request
 
+from app.api.telegram import (
+    receive_platform_telegram_webhook,
+    receive_telegram_webhook,
+)
 from app.core.telegram import hash_telegram_webhook_secret
 from app.db.session import AsyncSessionFactory
 from app.models import (
@@ -15,10 +19,6 @@ from app.models import (
     TelegramConnection,
     TelegramPlatformBot,
     TelegramWebhookEvent,
-)
-from app.api.telegram import (
-    receive_platform_telegram_webhook,
-    receive_telegram_webhook,
 )
 
 
