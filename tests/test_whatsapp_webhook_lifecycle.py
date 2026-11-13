@@ -12,7 +12,12 @@ from app.api.whatsapp import receive_whatsapp_webhook
 from app.core.config import get_settings
 from app.core.whatsapp import encrypt_whatsapp_secret
 from app.db.session import AsyncSessionFactory
-from app.models import BackgroundJob, Tenant, WhatsAppConnection, WhatsAppWebhookEvent
+from app.models import (
+    BackgroundJob,
+    Tenant,
+    WhatsAppConnection,
+    WhatsAppWebhookEvent,
+)
 
 
 APP_SECRET = "adm-013-test-whatsapp-secret"
