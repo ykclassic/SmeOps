@@ -130,6 +130,60 @@ def test_invalid_booking_reference_never_falls_back_to_existing_chat_context():
     assert not session.committed
 
 
+def test_inactive_tenant_booking_link_is_ignored_without_switching_chat_context():
+    tenant_id = uuid4()
+    bot = platform_bot()
+    reference = SimpleNamespace(tenant_id=tenant_id)
+    inactive_tenant = SimpleNamespace(status="deactivated")
+    session = Session([bot, None, None, reference, None, inactive_tenant])
+    jobs = []
+
+    async def enqueue(_session, **kwargs):
+        jobs.append(kwargs)
+
+    with client_for(session) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
+            json=start_update("book_deactivated-business-reference"),
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "queued_events": 0}
+    assert session.records == []
+    assert not session.committed
+    assert jobs == []
+
+
+def test_inactive_existing_chat_context_cannot_continue_booking():
+    bot = platform_bot()
+    tenant_id = uuid4()
+    context = SimpleNamespace(tenant_id=tenant_id)
+    session = Session([bot, None, context, SimpleNamespace(status="suspended")])
+    payload = {
+        "update_id": 301,
+        "message": {
+            "message_id": 301,
+            "chat": {"id": 7001, "type": "private"},
+            "from": {"id": 7001, "is_bot": False},
+            "text": "BOOK",
+        },
+    }
+    with client_for(session) as client:
+        response = client.post(
+            "/webhooks/telegram/platform",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "platform-secret"},
+            json=payload,
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored", "queued_events": 0}
+    assert session.records == []
+    assert not session.committed
+
+
 def test_replayed_start_update_is_deduplicated_before_switching_tenant_context():
     bot = platform_bot()
     duplicate = SimpleNamespace(id=uuid4(), payload_sha256="a" * 64)
