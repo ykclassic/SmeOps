@@ -261,3 +261,83 @@ async def test_whatsapp_lifecycle_job_retries_then_dead_letters_after_max_attemp
         assert dead_letter.last_error_code == "temporary_database_failure"
         assert dead_letter.locked_at is None
         assert dead_letter.locked_by is None
+
+
+@pytest.mark.asyncio
+async def test_expired_worker_lease_is_reclaimed_without_losing_attempt_count() -> None:
+    tenant = await _new_tenant()
+    original_worker = f"original-worker-{uuid4().hex}"
+    recovery_worker = f"recovery-worker-{uuid4().hex}"
+    async with AsyncSessionFactory() as session:
+        job = await enqueue_job(
+            session,
+            tenant_id=tenant.id,
+            job_type="whatsapp.accept_inbound",
+            payload={"webhook_event_id": str(uuid4())},
+            idempotency_key=f"lease-recovery:{uuid4()}",
+            max_attempts=3,
+        )
+        job_id = job.id
+        job.status = "running"
+        job.attempts = 1
+        job.locked_at = datetime.now(UTC) - timedelta(minutes=5)
+        job.locked_by = original_worker
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        reclaimed = await claim_next_job(
+            session,
+            worker_id=recovery_worker,
+            lease_seconds=30,
+        )
+
+    assert reclaimed is not None
+    assert reclaimed.id == job_id
+    assert reclaimed.attempts == 2
+    assert reclaimed.max_attempts == 3
+
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(BackgroundJob, job_id)
+        assert persisted is not None
+        assert persisted.status == "running"
+        assert persisted.attempts == 2
+        assert persisted.locked_by == recovery_worker
+        assert persisted.locked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_expired_worker_lease_at_max_attempts_moves_to_dead_letter() -> None:
+    tenant = await _new_tenant()
+    original_worker = f"exhausted-worker-{uuid4().hex}"
+    async with AsyncSessionFactory() as session:
+        job = await enqueue_job(
+            session,
+            tenant_id=tenant.id,
+            job_type="telegram.accept_inbound",
+            payload={"webhook_event_id": str(uuid4())},
+            idempotency_key=f"lease-dead-letter:{uuid4()}",
+            max_attempts=2,
+        )
+        job_id = job.id
+        job.status = "running"
+        job.attempts = 2
+        job.locked_at = datetime.now(UTC) - timedelta(minutes=5)
+        job.locked_by = original_worker
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        reclaimed = await claim_next_job(
+            session,
+            worker_id=f"replacement-worker-{uuid4().hex}",
+            lease_seconds=30,
+        )
+        assert reclaimed is None
+
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(BackgroundJob, job_id)
+        assert persisted is not None
+        assert persisted.status == "dead_letter"
+        assert persisted.attempts == 2
+        assert persisted.last_error_code == "worker_lease_expired"
+        assert persisted.locked_at is None
+        assert persisted.locked_by is None
