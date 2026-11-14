@@ -14,11 +14,11 @@ from app.core.whatsapp import (
 from app.jobs.queue import enqueue_job
 from app.models import (
     AuditEvent,
+    Tenant,
     WhatsAppConnection,
     WhatsAppConversation,
     WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
-    Tenant,
 )
 
 CUSTOMER_SERVICE_WINDOW = timedelta(hours=24)
@@ -104,10 +104,18 @@ async def enqueue_whatsapp_text(
         raise ValueError("idempotency_key must contain 1 to 160 characters")
 
     with session.no_autoflush:
-        tenant_result = await session.execute(select(Tenant).where(Tenant.id == tenant_id).with_for_update().execution_options(populate_existing=True))
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     tenant = tenant_result.scalar_one_or_none()
     if tenant is None or tenant.status != "active":
-        raise OutboundPolicyViolation("tenant_inactive", "Outbound messages can only be queued for active businesses.")
+        raise OutboundPolicyViolation(
+            "tenant_inactive",
+            "Outbound messages can only be queued for active businesses.",
+        )
 
     existing_result = await session.execute(
         select(WhatsAppOutboundMessage).where(
@@ -122,7 +130,7 @@ async def enqueue_whatsapp_text(
             recipient=normalized_recipient,
             body=normalized_body,
             deliver_after_deactivation=deliver_after_deactivation,
-        ): 
+        ):
             raise OutboundIdempotencyConflict(
                 "Idempotency key was used with different message content"
             )
@@ -169,7 +177,7 @@ async def enqueue_whatsapp_text(
             recipient=normalized_recipient,
             body=normalized_body,
             deliver_after_deactivation=deliver_after_deactivation,
-        ): 
+        ):
             raise OutboundIdempotencyConflict(
                 "Idempotency key was concurrently used with different message content"
             ) from None

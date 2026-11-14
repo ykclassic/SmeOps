@@ -59,7 +59,9 @@ class WhatsAppOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     status: Mapped[OutboundStatus] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")
     )
-    deliver_after_deactivation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    deliver_after_deactivation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

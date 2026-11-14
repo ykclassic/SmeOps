@@ -123,7 +123,9 @@ async def test_telegram_worker_delivers_preserved_message_after_deactivation(mon
         recipient_chat_id="998877", body_encrypted="cipher:Appointment confirmed",
         reply_markup=None, provider_message_id=None, last_error_code=None, sent_at=None,
     )
-    history = SimpleNamespace(provider_message_id=f"outbound:{message.id}", delivery_status="queued")
+    history = SimpleNamespace(
+        provider_message_id=f"outbound:{message.id}", delivery_status="queued"
+    )
     bot = SimpleNamespace(bot_token_encrypted="cipher:token")
     first, second = FakeSession([
         SimpleNamespace(id=tenant_id, status="deactivated"), message, bot
@@ -136,7 +138,9 @@ async def test_telegram_worker_delivers_preserved_message_after_deactivation(mon
 
     sessions = iter([first, second])
     monkeypatch.setattr(worker, "AsyncSessionFactory", lambda: Context(next(sessions)))
-    monkeypatch.setattr(worker, "decrypt_telegram_secret", lambda v: v.removeprefix("cipher:"))
+    monkeypatch.setattr(
+        worker, "decrypt_telegram_secret", lambda v: v.removeprefix("cipher:")
+    )
     sent = []
     async def fake_send(**kwargs):
         sent.append(kwargs)

@@ -55,7 +55,12 @@ async def enqueue_telegram_text(
         raise ValueError("Invalid idempotency key")
 
     with session.no_autoflush:
-        tenant_result = await session.execute(select(Tenant).where(Tenant.id == tenant_id).with_for_update().execution_options(populate_existing=True))
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     tenant = tenant_result.scalar_one_or_none()
     if tenant is None or tenant.status != "active":
         raise ValueError("Outbound messages can only be queued for active businesses")
@@ -74,7 +79,7 @@ async def enqueue_telegram_text(
             body=normalized_body,
             reply_markup=reply_markup,
             deliver_after_deactivation=deliver_after_deactivation,
-        ): 
+        ):
             raise TelegramOutboundIdempotencyConflict(
                 "Idempotency key was reused with different message content"
             )
@@ -129,7 +134,7 @@ async def enqueue_telegram_text(
             body=normalized_body,
             reply_markup=reply_markup,
             deliver_after_deactivation=deliver_after_deactivation,
-        ): 
+        ):
             raise TelegramOutboundIdempotencyConflict(
                 "Idempotency key was concurrently reused with different content"
             ) from None

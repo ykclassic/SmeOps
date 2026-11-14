@@ -235,7 +235,10 @@ async def test_owner_notification_worker_sends_reference_and_local_booking_detai
     )
     service = SimpleNamespace(name="Hairs Washing")
     customer = SimpleNamespace(name="Ada Lovelace", phone_e164="+2348012345678")
-    tenant = SimpleNamespace(id=tenant_id, status="active", name="Test Salon", business_timezone="Africa/Lagos")
+    tenant = SimpleNamespace(
+        id=tenant_id, status="active", name="Test Salon",
+        business_timezone="Africa/Lagos",
+    )
 
     first = Session([tenant, notification, link, connection, (appointment, service, customer, tenant)])
     second = Session([notification])
@@ -335,7 +338,10 @@ async def test_shared_platform_bot_delivers_each_tenant_alert_to_its_own_owner(m
         sessions.extend(
             [
                 Session(
-                    [tenant, notification, link, shared_bot, (appointment, service, customer, tenant)]
+                    [
+                        tenant, notification, link, shared_bot,
+                        (appointment, service, customer, tenant),
+                    ]
                 ),
                 Session([notification]),
             ]
@@ -446,14 +452,22 @@ async def test_repeated_reschedules_queue_distinct_owner_events(monkeypatch):
 @pytest.mark.asyncio
 async def test_owner_appointment_alert_is_delivered_after_tenant_deactivation(monkeypatch):
     tenant_id, owner_id, notification_id, appointment_id = uuid4(), uuid4(), uuid4(), uuid4()
-    tenant = SimpleNamespace(id=tenant_id, status="deactivated", name="Existing Business", business_timezone="Africa/Lagos")
+    tenant = SimpleNamespace(
+        id=tenant_id, status="deactivated", name="Existing Business",
+        business_timezone="Africa/Lagos",
+    )
     notification = SimpleNamespace(
         id=notification_id, tenant_id=tenant_id, owner_user_id=owner_id,
         appointment_id=appointment_id, event_type="appointment.created", status="queued",
         provider_message_id=None, last_error_code=None, sent_at=None,
     )
-    link, bot = SimpleNamespace(chat_id="998877"), SimpleNamespace(bot_token_encrypted="cipher:token")
-    appointment = SimpleNamespace(id=appointment_id, starts_at=datetime(2026, 11, 9, 9, 0, tzinfo=UTC), status="confirmed")
+    link = SimpleNamespace(chat_id="998877")
+    bot = SimpleNamespace(bot_token_encrypted="cipher:token")
+    appointment = SimpleNamespace(
+        id=appointment_id,
+        starts_at=datetime(2026, 11, 9, 9, 0, tzinfo=UTC),
+        status="confirmed",
+    )
     service, customer = SimpleNamespace(name="Hair Washing"), SimpleNamespace(name="Customer")
     first = Session([tenant, notification, link, bot, (appointment, service, customer, tenant)])
     second = Session([notification])
@@ -464,8 +478,12 @@ async def test_owner_appointment_alert_is_delivered_after_tenant_deactivation(mo
         async def __aexit__(self, *_args): return False
 
     sessions = iter([first, second])
-    monkeypatch.setattr(notification_jobs, "AsyncSessionFactory", lambda: Context(next(sessions)))
-    monkeypatch.setattr(notification_jobs, "decrypt_telegram_secret", lambda v: v.removeprefix("cipher:"))
+    monkeypatch.setattr(
+        notification_jobs, "AsyncSessionFactory", lambda: Context(next(sessions))
+    )
+    monkeypatch.setattr(
+        notification_jobs, "decrypt_telegram_secret", lambda v: v.removeprefix("cipher:")
+    )
     sent = []
     async def fake_send(**kwargs):
         sent.append(kwargs)
