@@ -157,7 +157,8 @@ async def test_telegram_worker_delivers_preserved_message_after_deactivation(mon
 
 
 @pytest.mark.asyncio
-async def test_telegram_worker_suppresses_preserved_message_for_suspended_tenant(monkeypatch):
+@pytest.mark.parametrize("tenant_status", ["suspended", "pending"])
+async def test_telegram_worker_suppresses_preserved_message_for_inactive_tenant(monkeypatch, tenant_status):
     from app.jobs import telegram_outbound as worker
     from app.jobs.queue import ClaimedJob
     tenant_id = uuid4()
@@ -168,7 +169,7 @@ async def test_telegram_worker_suppresses_preserved_message_for_suspended_tenant
     history = SimpleNamespace(
         provider_message_id=f"outbound:{message.id}", delivery_status="queued"
     )
-    session = FakeSession([SimpleNamespace(id=tenant_id, status="suspended"), message, history])
+    session = FakeSession([SimpleNamespace(id=tenant_id, status=tenant_status), message, history])
 
     class Context:
         async def __aenter__(self): return session
