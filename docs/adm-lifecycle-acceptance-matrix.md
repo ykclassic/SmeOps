@@ -2,8 +2,8 @@
 
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
 **Candidate:** follow-up acceptance branch `feature/adm-notification-acceptance`, based on merged PR #72.  
-**Candidate implementation head:** pending CI for `feature/adm-notification-acceptance`.  
-**CI evidence:** PR #72's final candidate passed CI run #904 (`43590141871`). This follow-up branch adds three end-to-end notification tests and WhatsApp queue retry/dead-letter coverage; its CI has not yet run.  
+**Candidate implementation head:** `4e594c153610083e96ca7a866c19db53ae9c3568`.  
+**CI evidence:** Follow-up PR #73 head `4e594c153610083e96ca7a866c19db53ae9c3568` passed GitHub Actions CI run #911 (`43624168342`): 252 backend tests passed with 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration, downgrade-safety, frontend type-check and production build all passed. The final documentation revision must receive its own CI run before merge.  
 **Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior. The staging database migration to `0024_outbound_lifecycle_policy` and both `deliver_after_deactivation` columns were independently verified, but targeted lifecycle staging acceptance remains unrun.
 
 ## Status definitions
