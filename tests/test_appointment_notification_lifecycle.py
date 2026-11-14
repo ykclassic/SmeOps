@@ -150,13 +150,21 @@ async def test_committed_appointment_owner_notification_delivers_after_deactivat
             assert appointment is not None and appointment.status == "confirmed"
             assert notification is not None and notification.status == "queued"
             notification_id = notification.id
-            queued_job = await session.scalar(
-                select(BackgroundJob).where(
-                    BackgroundJob.tenant_id == tenant_id,
-                    BackgroundJob.job_type == "telegram.owner_appointment_alert",
-                    BackgroundJob.payload["notification_id"].astext
-                    == str(notification_id),
+            queued_jobs = (
+                await session.scalars(
+                    select(BackgroundJob).where(
+                        BackgroundJob.tenant_id == tenant_id,
+                        BackgroundJob.job_type == "telegram.owner_appointment_alert",
+                    )
                 )
+            ).all()
+            queued_job = next(
+                (
+                    candidate
+                    for candidate in queued_jobs
+                    if candidate.payload.get("notification_id") == str(notification_id)
+                ),
+                None,
             )
             assert queued_job is not None and queued_job.status == "queued"
             job_id = queued_job.id
