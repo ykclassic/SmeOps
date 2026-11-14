@@ -2,8 +2,8 @@
 
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
 **Candidate:** follow-up acceptance branch `feature/adm-notification-acceptance`, based on merged PR #72.  
-**Candidate implementation head:** `cc80156a8bed1246691fd47912687730cbdd2301` (additional stale-lease coverage pending CI).  
-**CI evidence:** PR #73 code/test head `4e594c153610083e96ca7a866c19db53ae9c3568` passed CI run #911 (`43624168342`): 252 backend tests passed with 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration, downgrade-safety, frontend type-check and production build all passed. Documentation revision `340489f35f9ae485795d40399a131df189a67603` passed CI run #913 (`43624343894`) with the same 252 tests and all quality/frontend jobs green. Two additional queue lease-recovery tests were added afterward and require a fresh CI run.  
+**Candidate implementation head:** `6f84c072db2262c9c415f53e394f2b72c23a494d`.  
+**CI evidence:** PR #73 head `6f84c072db2262c9c415f53e394f2b72c23a494d` passed CI run #917 (`43624569218`): 254 backend tests passed with 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration, downgrade-safety, frontend type-check and production build all passed.  
 **Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior. The staging database migration to `0024_outbound_lifecycle_policy` and both `deliver_after_deactivation` columns were independently verified, but targeted lifecycle staging acceptance remains unrun.
 
 ## Status definitions
