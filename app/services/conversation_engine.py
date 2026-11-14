@@ -344,26 +344,30 @@ async def process_channel_conversation_job(
         )
 
     async with AsyncSessionFactory() as session:
-        if channel == "telegram":
-            # Re-check under the tenant mutex after external provisioning.
-            # Lock order remains tenant first, then TelegramConversation.
-            lifecycle_result = await session.execute(
-                select(Tenant)
-                .where(Tenant.id == job.tenant_id)
-                .with_for_update()
+        # Acquire the tenant lifecycle mutex before locking the channel
+        # conversation. This serializes both WhatsApp and Telegram workers
+        # against owner deactivation and keeps a consistent Tenant -> Conversation
+        # lock order. Telegram reaches this point only after its external bot
+        # provisioning call has completed without database locks held.
+        lifecycle_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == job.tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        lifecycle_tenant = lifecycle_result.scalar_one_or_none()
+        if lifecycle_tenant is None:
+            raise ValueError("Conversation tenant does not exist")
+        if lifecycle_tenant.status != "active":
+            logger.info(
+                "Conversation job skipped for inactive tenant",
+                extra={
+                    "tenant_id": str(job.tenant_id),
+                    "channel": channel,
+                    "tenant_status": lifecycle_tenant.status,
+                },
             )
-            lifecycle_tenant = lifecycle_result.scalar_one_or_none()
-            if lifecycle_tenant is None:
-                raise ValueError("Telegram conversation tenant does not exist")
-            if lifecycle_tenant.status != "active":
-                logger.info(
-                    "Telegram conversation job skipped for inactive tenant",
-                    extra={
-                        "tenant_id": str(job.tenant_id),
-                        "tenant_status": lifecycle_tenant.status,
-                    },
-                )
-                return
+            return
 
         conversation_result = await session.execute(
             select(conversation_model)
@@ -1297,32 +1301,33 @@ async def process_channel_conversation_job(
         context["last_processed_at"] = inbound.created_at.isoformat()
         context["last_processed_message_id"] = str(inbound.id)
         conversation.context = context
-        if channel == "telegram":
-            # Revalidate under the tenant mutex immediately before committing
-            # conversation state and outbound work. Pending ORM writes must not
-            # autoflush before this lock is acquired.
-            with session.no_autoflush:
-                final_tenant_result = await session.execute(
-                    select(Tenant)
-                    .where(Tenant.id == job.tenant_id)
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
-                )
-            final_tenant = final_tenant_result.scalar_one_or_none()
-            if final_tenant is None:
-                await session.rollback()
-                raise ValueError("Telegram conversation tenant does not exist")
-            if final_tenant.status != "active":
-                inactive_status = final_tenant.status
-                await session.rollback()
-                logger.info(
-                    "Telegram conversation result discarded after tenant deactivation",
-                    extra={
-                        "tenant_id": str(job.tenant_id),
-                        "tenant_status": inactive_status,
-                    },
-                )
-                return
+        # Final lifecycle guard applies to both channels. Keep it immediately
+        # before enqueue/commit so future code paths cannot accidentally rely
+        # only on the initial worker check. no_autoflush prevents pending
+        # conversation/audit changes from flushing before the tenant lock.
+        with session.no_autoflush:
+            final_tenant_result = await session.execute(
+                select(Tenant)
+                .where(Tenant.id == job.tenant_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        final_tenant = final_tenant_result.scalar_one_or_none()
+        if final_tenant is None:
+            await session.rollback()
+            raise ValueError("Conversation tenant does not exist")
+        if final_tenant.status != "active":
+            inactive_status = final_tenant.status
+            await session.rollback()
+            logger.info(
+                "Conversation result discarded after tenant deactivation",
+                extra={
+                    "tenant_id": str(job.tenant_id),
+                    "channel": channel,
+                    "tenant_status": inactive_status,
+                },
+            )
+            return
         try:
             await _send_reply(
                 session,
