@@ -327,3 +327,64 @@ async def test_worker_rechecks_service_window_before_provider_call(monkeypatch):
         persisted_tenant = await session.get(Tenant, tenant.id)
         await session.delete(persisted_tenant)
         await session.commit()
+
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_worker_suppresses_ordinary_message_after_deactivation(monkeypatch):
+    tenant, _ = await create_connection()
+    async with AsyncSessionFactory() as session:
+        message = await enqueue_whatsapp_text(
+            session, tenant_id=tenant.id, recipient="2348012345678",
+            body="Ordinary follow-up", idempotency_key=f"test:{uuid4()}",
+        )
+        message_id = message.id
+        (await session.get(Tenant, tenant.id)).status = "deactivated"
+        await session.commit()
+
+    async def must_not_send(**_kwargs):
+        raise AssertionError("ordinary outbound messages must be suppressed")
+    monkeypatch.setattr("app.jobs.whatsapp_outbound.send_text_message", must_not_send)
+    await send_outbound_whatsapp_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant.id, job_type="whatsapp.send_text",
+        payload={"message_id": str(message_id)}, attempts=1, max_attempts=2,
+    ))
+
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(WhatsAppOutboundMessage, message_id)
+        assert persisted.status == "failed"
+        assert persisted.last_error_code == "tenant_deactivated"
+        await session.delete(await session.get(Tenant, tenant.id))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_worker_delivers_preserved_confirmation_after_deactivation(monkeypatch):
+    tenant, _ = await create_connection()
+    async with AsyncSessionFactory() as session:
+        message = await enqueue_whatsapp_text(
+            session, tenant_id=tenant.id, recipient="2348012345678",
+            body="Your appointment is confirmed.",
+            idempotency_key=f"appointment-confirmation:{uuid4()}",
+            deliver_after_deactivation=True,
+        )
+        message_id = message.id
+        (await session.get(Tenant, tenant.id)).status = "deactivated"
+        await session.commit()
+
+    sent = []
+    async def fake_send(**kwargs):
+        sent.append(kwargs)
+        return type("Result", (), {"provider_message_id": "wamid.test"})()
+    monkeypatch.setattr("app.jobs.whatsapp_outbound.send_text_message", fake_send)
+    await send_outbound_whatsapp_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant.id, job_type="whatsapp.send_text",
+        payload={"message_id": str(message_id)}, attempts=1, max_attempts=2,
+    ))
+
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(WhatsAppOutboundMessage, message_id)
+        assert len(sent) == 1
+        assert persisted.status == "sent"
+        await session.delete(await session.get(Tenant, tenant.id))
+        await session.commit()

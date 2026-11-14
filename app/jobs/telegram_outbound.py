@@ -17,6 +17,7 @@ from app.models import (
     TelegramConversationMessage,
     TelegramOutboundMessage,
     TelegramPlatformBot,
+    Tenant,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,10 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
         raise ValueError("Invalid outbound Telegram job payload") from exc
 
     async with AsyncSessionFactory() as session:
+        tenant_result = await session.execute(select(Tenant).where(Tenant.id == job.tenant_id).with_for_update().execution_options(populate_existing=True))
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise ValueError("Outbound Telegram tenant does not exist")
         result = await session.execute(
             select(TelegramOutboundMessage)
             .where(
@@ -52,6 +57,13 @@ async def send_outbound_telegram_job(job: ClaimedJob) -> None:
             return
         if message.status != "queued":
             raise ValueError("Outbound Telegram message is not sendable")
+
+        if tenant.status != "active" and not (tenant.status == "deactivated" and message.deliver_after_deactivation):
+            message.status = "failed"
+            message.last_error_code = "tenant_deactivated" if tenant.status == "deactivated" else "tenant_inactive"
+            await _sync_history(session, job.tenant_id, message)
+            await session.commit()
+            return
 
         platform_result = await session.execute(
             select(TelegramPlatformBot).where(

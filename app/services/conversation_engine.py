@@ -238,6 +238,7 @@ async def _send_reply(
     inbound_message_id: UUID,
     body: str,
     reply_markup: dict | None = None,
+    deliver_after_deactivation: bool = False,
 ) -> None:
     if channel == "telegram":
         await enqueue_telegram_text(
@@ -247,6 +248,7 @@ async def _send_reply(
             body=body,
             idempotency_key=f"conversation-reply:{inbound_message_id}",
             reply_markup=reply_markup,
+            deliver_after_deactivation=deliver_after_deactivation,
         )
         return
     if customer_phone is None:
@@ -257,6 +259,7 @@ async def _send_reply(
         recipient=customer_phone,
         body=body,
         idempotency_key=f"conversation-reply:{inbound_message_id}",
+        deliver_after_deactivation=deliver_after_deactivation,
     )
 
 
@@ -397,6 +400,7 @@ async def process_channel_conversation_job(
 
         context = dict(conversation.context or {})
         reply_markup = None
+        deliver_after_deactivation = False
         previous_processed = context.get("last_processed_at")
         if previous_processed:
             try:
@@ -775,6 +779,7 @@ async def process_channel_conversation_job(
                                 event_type="appointment.cancelled.customer",
                                 event_key=f"appointment.cancelled.customer:{event_id}",
                             )
+                            deliver_after_deactivation = True
                             reply = (
                                 "Your appointment has been cancelled. "
                                 "The business has been notified."
@@ -938,6 +943,7 @@ async def process_channel_conversation_job(
                                     event_type="appointment.rescheduled.customer",
                                     event_key=f"appointment.rescheduled.customer:{event_id}",
                                 )
+                                deliver_after_deactivation = True
                                 new_local = appointment.starts_at.astimezone(timezone)
                                 new_label = new_local.strftime("%A, %d %B %Y at %I:%M %p")
                                 reply = (
@@ -1242,6 +1248,7 @@ async def process_channel_conversation_job(
                         start_local = appointment.starts_at.astimezone(timezone)
                         booking["step"] = "complete"
                         booking["appointment_id"] = str(appointment.id)
+                        deliver_after_deactivation = True
                         reply = (
                             f"Your appointment is confirmed.\n"
                             f"Reference: {str(appointment.id)[:8].upper()}\n"
@@ -1326,6 +1333,7 @@ async def process_channel_conversation_job(
                 inbound_message_id=inbound.id,
                 body=reply,
                 reply_markup=reply_markup if channel == "telegram" else None,
+                deliver_after_deactivation=deliver_after_deactivation,
             )
             await session.commit()
         except OutboundPolicyViolation:

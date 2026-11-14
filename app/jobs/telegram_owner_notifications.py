@@ -35,6 +35,10 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
         raise ValueError("Invalid owner notification job payload") from exc
 
     async with AsyncSessionFactory() as session:
+        tenant_result = await session.execute(select(Tenant).where(Tenant.id == job.tenant_id).with_for_update().execution_options(populate_existing=True))
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise ValueError("Owner notification tenant does not exist")
         result = await session.execute(
             select(TelegramOwnerNotification)
             .where(
@@ -55,6 +59,11 @@ async def send_owner_appointment_alert_job(job: ClaimedJob) -> None:
             return
         if notification.status != "queued":
             raise ValueError("Owner notification is not sendable")
+        if tenant.status not in {"active", "deactivated"}:
+            notification.status = "failed"
+            notification.last_error_code = "tenant_inactive"
+            await session.commit()
+            return
 
         link_result = await session.execute(
             select(TelegramOwnerLink)
