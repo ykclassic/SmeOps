@@ -3,7 +3,7 @@
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
 **Candidate:** PR #72, branch `feature/adm-015-outbound-lifecycle`.  
 **Candidate implementation head:** `843e668fce5940811789494461f96bd52769f5f2`.  
-**CI evidence:** GitHub Actions run #887 (`43588525957`) passed on baseline implementation head `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration and downgrade-safety checks, frontend type-check and production build passed. The current candidate head `843e668fce5940811789494461f96bd52769f5f2` has CI run #900 (`43589992059`) in progress; the new regressions below are not accepted until that exact-head run passes.  
+**CI evidence:** GitHub Actions run #887 (`43588525957`) passed on baseline implementation head `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration and downgrade-safety checks, frontend type-check and production build passed. The current code/test head `843e668fce5940811789494461f96bd52769f5f2` passed CI run #900 (`43589992059`): 249 backend tests, 2 Starlette deprecation warnings, Ruff, migration checks, frontend type-check and production build all passed. Matrix/documentation revision `7dbb17c0bd0d6301a92903d4b756ce9cc2b8ab6a` is being revalidated by CI run #902 (`43590044602`); that run remains in progress at the time of this matrix update.  
 **Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior.
 
 ## Status definitions
