@@ -151,8 +151,9 @@ async def test_telegram_ingress_waits_for_deactivation_lock_and_rechecks_state()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended", "pending"])
 async def test_queued_telegram_event_is_consumed_without_processing_for_inactive_tenant(
-    monkeypatch,
+    monkeypatch, tenant_status,
 ):
     tenant_id = uuid4()
     event = SimpleNamespace(
@@ -161,7 +162,7 @@ async def test_queued_telegram_event_is_consumed_without_processing_for_inactive
         processed_at=None,
         payload_encrypted="unused",
     )
-    session = Session(SimpleNamespace(status="deactivated"), event)
+    session = Session(SimpleNamespace(status=tenant_status), event)
     monkeypatch.setattr(telegram_jobs, "AsyncSessionFactory", lambda: session)
 
     async def unexpected_owner_link(*_args, **_kwargs):
@@ -219,11 +220,12 @@ async def test_queued_telegram_event_continues_for_active_tenant(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended", "pending"])
 async def test_telegram_conversation_job_skips_before_loading_conversation_for_inactive_tenant(
-    monkeypatch,
+    monkeypatch, tenant_status,
 ):
     tenant_id = uuid4()
-    session = Session(SimpleNamespace(status="suspended"))
+    session = Session(SimpleNamespace(status=tenant_status))
     monkeypatch.setattr("app.db.session.AsyncSessionFactory", lambda: session)
     job = ClaimedJob(
         id=uuid4(),
