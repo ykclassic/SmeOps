@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 
+from app.core.config import get_settings
 from app.core.whatsapp import encrypt_whatsapp_secret, hash_whatsapp_contact
 from app.db.session import AsyncSessionFactory
 from app.jobs import whatsapp as whatsapp_jobs
@@ -19,6 +20,17 @@ from app.models import (
     WhatsAppWebhookEvent,
 )
 from app.services.conversation_engine import process_whatsapp_conversation_job
+
+
+@pytest.fixture(autouse=True)
+def whatsapp_worker_encryption_settings(monkeypatch):
+    monkeypatch.setenv(
+        "WHATSAPP_TOKEN_ENCRYPTION_KEY",
+        "c21lb3BzLWNpLXdoYXRzYXBwLWZlcm5ldC1rZXktMzI=",
+    )
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 async def _create_tenant_and_event(*, status: str = "active"):
@@ -86,6 +98,22 @@ async def _wait_until_blocked_by(blocking_pid: int) -> None:
         await asyncio.sleep(0.01)
     raise AssertionError(
         f"No PostgreSQL backend was observed waiting on backend {blocking_pid}"
+    )
+
+
+async def _wait_until_pid_is_blocked(waiting_pid: int) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        async with AsyncSessionFactory() as observer:
+            blocked = await observer.scalar(
+                text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"),
+                {"pid": waiting_pid},
+            )
+        if blocked:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(
+        f"PostgreSQL did not report backend {waiting_pid} waiting on a row lock"
     )
 
 
@@ -196,7 +224,7 @@ async def test_running_whatsapp_accept_worker_serializes_before_deactivation(mon
                 select(Tenant).where(Tenant.id == tenant_id).with_for_update()
             )
         )
-        await _wait_until_blocked_by(lifecycle_pid)
+        await _wait_until_pid_is_blocked(lifecycle_pid)
 
         release_processing.set()
         await asyncio.wait_for(worker_task, timeout=5)
