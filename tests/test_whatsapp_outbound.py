@@ -388,3 +388,54 @@ async def test_whatsapp_worker_delivers_preserved_confirmation_after_deactivatio
         assert persisted.status == "sent"
         await session.delete(await session.get(Tenant, tenant.id))
         await session.commit()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["suspended", "pending"])
+async def test_whatsapp_worker_suppresses_preserved_confirmation_for_non_deactivated_inactive_tenant(
+    monkeypatch, tenant_status
+):
+    tenant, _ = await create_connection()
+    async with AsyncSessionFactory() as session:
+        message = await enqueue_whatsapp_text(
+            session, tenant_id=tenant.id, recipient="2348012345678",
+            body="Committed appointment confirmation", idempotency_key=f"preserved:{uuid4()}",
+            deliver_after_deactivation=True,
+        )
+        message_id = message.id
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        persisted_tenant.status = tenant_status
+        await session.commit()
+
+    async def must_not_send(**_kwargs):
+        raise AssertionError("suspended/pending tenant must suppress preserved messages")
+    monkeypatch.setattr("app.jobs.whatsapp_outbound.send_text_message", must_not_send)
+    await send_outbound_whatsapp_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant.id, job_type="whatsapp.send_text",
+        payload={"message_id": str(message_id)}, attempts=1, max_attempts=2,
+    ))
+    async with AsyncSessionFactory() as session:
+        persisted = await session.get(WhatsAppOutboundMessage, message_id)
+        assert persisted is not None and persisted.status == "failed"
+        assert persisted.last_error_code == "tenant_inactive"
+        await session.delete(await session.get(Tenant, tenant.id))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended", "pending"])
+async def test_whatsapp_enqueue_rejects_inactive_tenant(tenant_status):
+    tenant, _ = await create_connection()
+    async with AsyncSessionFactory() as session:
+        persisted_tenant = await session.get(Tenant, tenant.id)
+        persisted_tenant.status = tenant_status
+        await session.commit()
+    async with AsyncSessionFactory() as session:
+        with pytest.raises(OutboundPolicyViolation) as exc_info:
+            await enqueue_whatsapp_text(
+                session, tenant_id=tenant.id, recipient="2348012345678",
+                body="Must not enqueue", idempotency_key=f"inactive:{uuid4()}",
+            )
+        assert exc_info.value.error_code == "tenant_inactive"
+    async with AsyncSessionFactory() as session:
+        await session.delete(await session.get(Tenant, tenant.id))
+        await session.commit()
