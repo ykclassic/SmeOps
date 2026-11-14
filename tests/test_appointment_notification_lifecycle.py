@@ -1,5 +1,5 @@
-from datetime import UTC, datetime, timedelta
 import hashlib
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -19,7 +19,6 @@ from app.models import (
     TelegramOwnerNotification,
     TelegramPlatformBot,
     Tenant,
-    User,
 )
 from app.services.tenant_lifecycle import transition_tenant_lifecycle
 
