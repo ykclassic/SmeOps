@@ -139,3 +139,64 @@ async def test_job_retries_then_moves_to_dead_letter() -> None:
         assert dead_letter.status == "dead_letter"
         assert dead_letter.last_error_code == "temporary_failure"
         assert dead_letter.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_telegram_lifecycle_job_retries_then_dead_letters_after_max_attempts() -> None:
+    tenant = await _new_tenant()
+    worker_id = f"telegram-lifecycle-worker-{uuid4().hex}"
+    async with AsyncSessionFactory() as session:
+        job = await enqueue_job(
+            session,
+            tenant_id=tenant.id,
+            job_type="telegram.accept_inbound",
+            payload={"webhook_event_id": str(uuid4())},
+            idempotency_key=f"telegram-lifecycle:{uuid4()}",
+            max_attempts=2,
+        )
+        job_id = job.id
+        job.status = "running"
+        job.attempts = 1
+        job.locked_at = datetime.now(UTC)
+        job.locked_by = worker_id
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        await fail_job(
+            session,
+            job_id=job_id,
+            worker_id=worker_id,
+            error_code="temporary_database_failure",
+        )
+
+    async with AsyncSessionFactory() as session:
+        retry = await session.get(BackgroundJob, job_id)
+        assert retry is not None
+        assert retry.status == "queued"
+        assert retry.attempts == 1
+        assert retry.run_at > datetime.now(UTC)
+        assert retry.locked_at is None
+        assert retry.locked_by is None
+
+        retry.status = "running"
+        retry.attempts = 2
+        retry.locked_at = datetime.now(UTC)
+        retry.locked_by = worker_id
+        await session.commit()
+
+    async with AsyncSessionFactory() as session:
+        await fail_job(
+            session,
+            job_id=job_id,
+            worker_id=worker_id,
+            error_code="temporary_database_failure",
+        )
+
+    async with AsyncSessionFactory() as session:
+        dead_letter = await session.get(BackgroundJob, job_id)
+        assert dead_letter is not None
+        assert dead_letter.status == "dead_letter"
+        assert dead_letter.attempts == 2
+        assert dead_letter.last_error_code == "temporary_database_failure"
+        assert dead_letter.locked_at is None
+        assert dead_letter.locked_by is None
