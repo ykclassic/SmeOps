@@ -196,18 +196,48 @@ async def receive_whatsapp_webhook(
             detail="Unsupported webhook payload",
         )
 
-    queued_events = 0
-    for phone_number_id, provider_event_id, event_type, event_payload in _extract_event_payloads(
-        payload
-    ):
+    event_payloads = list(_extract_event_payloads(payload))
+    phone_number_ids = {item[0] for item in event_payloads}
+    connections_by_phone: dict[str, WhatsAppConnection] = {}
+    if phone_number_ids:
         connection_result = await session.execute(
             select(WhatsAppConnection).where(
-                WhatsAppConnection.phone_number_id == phone_number_id,
+                WhatsAppConnection.phone_number_id.in_(phone_number_ids),
                 WhatsAppConnection.status == "active",
             )
         )
-        connection = connection_result.scalar_one_or_none()
+        connections_by_phone = {
+            connection.phone_number_id: connection
+            for connection in connection_result.scalars().all()
+        }
+
+    # Lock every affected tenant in one deterministic order. A webhook batch
+    # can contain multiple tenants; locking in provider payload order would
+    # let concurrent batches with opposite ordering deadlock each other.
+    tenant_ids = sorted(
+        {connection.tenant_id for connection in connections_by_phone.values()},
+        key=str,
+    )
+    tenants_by_id: dict[UUID, Tenant] = {}
+    if tenant_ids:
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id.in_(tenant_ids))
+            .order_by(Tenant.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        tenants_by_id = {
+            tenant.id: tenant for tenant in tenant_result.scalars().all()
+        }
+
+    queued_events = 0
+    for phone_number_id, provider_event_id, event_type, event_payload in event_payloads:
+        connection = connections_by_phone.get(phone_number_id)
         if connection is None:
+            continue
+        tenant = tenants_by_id.get(connection.tenant_id)
+        if tenant is None or tenant.status != "active":
             continue
 
         canonical_payload = json.dumps(
