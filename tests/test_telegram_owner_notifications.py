@@ -240,7 +240,10 @@ async def test_owner_notification_worker_sends_reference_and_local_booking_detai
         business_timezone="Africa/Lagos",
     )
 
-    first = Session([tenant, notification, link, connection, (appointment, service, customer, tenant)])
+    first = Session([
+        tenant, notification, link, connection,
+        (appointment, service, customer, tenant),
+    ])
     second = Session([notification])
     sessions = iter([first, second])
 

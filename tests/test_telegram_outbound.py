@@ -165,7 +165,9 @@ async def test_telegram_worker_suppresses_preserved_message_for_suspended_tenant
         id=uuid4(), tenant_id=tenant_id, status="queued", deliver_after_deactivation=True,
         provider_message_id=None, last_error_code=None,
     )
-    history = SimpleNamespace(provider_message_id=f"outbound:{message.id}", delivery_status="queued")
+    history = SimpleNamespace(
+        provider_message_id=f"outbound:{message.id}", delivery_status="queued"
+    )
     session = FakeSession([SimpleNamespace(id=tenant_id, status="suspended"), message, history])
 
     class Context:
