@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import nullcontext
 from types import SimpleNamespace
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -9,8 +10,15 @@ from sqlalchemy import delete, text
 from app.api.telegram import _lock_active_telegram_tenant
 from app.db.session import AsyncSessionFactory
 from app.jobs import telegram as telegram_jobs
-from app.jobs.queue import ClaimedJob
-from app.models import AuditEvent, Tenant, User
+from app.core.telegram import encrypt_telegram_secret
+from app.jobs.queue import ClaimedJob, complete_job, enqueue_job
+from app.models import (
+    AuditEvent,
+    BackgroundJob,
+    TelegramWebhookEvent,
+    Tenant,
+    User,
+)
 from app.services import conversation_engine
 from app.services.tenant_lifecycle import transition_tenant_lifecycle
 
@@ -243,3 +251,88 @@ async def test_telegram_conversation_job_skips_before_loading_conversation_for_i
 
     assert session.execute_count == 1
     assert not session.committed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended", "pending"])
+async def test_inactive_telegram_event_job_completes_without_retry_or_dead_letter(
+    tenant_status,
+):
+    tenant_id = uuid4()
+    worker_id = f"lifecycle-worker-{uuid4().hex}"
+    async with AsyncSessionFactory() as setup:
+        tenant = Tenant(
+            id=tenant_id,
+            name="Telegram queue lifecycle",
+            slug=f"tg-queue-lifecycle-{uuid4().hex}",
+            status=tenant_status,
+            business_timezone="Africa/Lagos",
+        )
+        setup.add(tenant)
+        await setup.flush()
+        event = TelegramWebhookEvent(
+            tenant_id=tenant_id,
+            provider_update_id=f"update-{uuid4().hex}",
+            event_type="message",
+            payload_encrypted=encrypt_telegram_secret(
+                '{"message":{"text":"must not be processed"}}'
+            ),
+            payload_sha256="a" * 64,
+            status="queued",
+        )
+        setup.add(event)
+        await setup.flush()
+        event_id = event.id
+        job = await enqueue_job(
+            setup,
+            tenant_id=tenant_id,
+            job_type="telegram.accept_inbound",
+            payload={"webhook_event_id": str(event_id)},
+            idempotency_key=f"tg-lifecycle:{uuid4().hex}",
+            max_attempts=3,
+        )
+        job_id = job.id
+        job.status = "running"
+        job.attempts = 1
+        job.locked_at = datetime.now(UTC)
+        job.locked_by = worker_id
+        await setup.commit()
+
+    try:
+        await telegram_jobs.accept_inbound_telegram_job(
+            ClaimedJob(
+                id=job_id,
+                tenant_id=tenant_id,
+                job_type="telegram.accept_inbound",
+                payload={"webhook_event_id": str(event_id)},
+                attempts=1,
+                max_attempts=3,
+            )
+        )
+        async with AsyncSessionFactory() as session:
+            await complete_job(session, job_id=job_id, worker_id=worker_id)
+
+        async with AsyncSessionFactory() as verify:
+            event = await verify.get(TelegramWebhookEvent, event_id)
+            job = await verify.get(BackgroundJob, job_id)
+            assert event is not None
+            assert event.status == "processed"
+            assert event.processed_at is not None
+            assert job is not None
+            assert job.status == "completed"
+            assert job.attempts == 1
+            assert job.last_error_code is None
+            assert job.locked_at is None
+            assert job.locked_by is None
+    finally:
+        async with AsyncSessionFactory() as cleanup:
+            async with cleanup.begin():
+                await cleanup.execute(
+                    delete(BackgroundJob).where(BackgroundJob.tenant_id == tenant_id)
+                )
+                await cleanup.execute(
+                    delete(TelegramWebhookEvent).where(
+                        TelegramWebhookEvent.tenant_id == tenant_id
+                    )
+                )
+                await cleanup.execute(delete(Tenant).where(Tenant.id == tenant_id))
