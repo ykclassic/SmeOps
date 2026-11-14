@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.core.telegram import encrypt_telegram_secret
@@ -47,6 +47,11 @@ async def test_committed_appointment_owner_notification_delivers_after_deactivat
         "c21lb3BzLWNpLXdoYXRzYXBwLWZlcm5ldC1rZXktMzI=",
     )
     get_settings.cache_clear()
+    tenant_id = None
+    platform_bot_id = None
+    platform_bot_created = False
+    platform_bot_snapshot = None
+
     try:
         slug = f"appt-notify-{uuid4().hex[:12]}"
         with TestClient(app) as client:
@@ -96,23 +101,38 @@ async def test_committed_appointment_owner_notification_delivers_after_deactivat
                         singleton_key="platform",
                         bot_id=f"test-{uuid4().hex}",
                         bot_username=f"test_{uuid4().hex[:12]}",
-                        bot_token_encrypted=encrypt_telegram_secret("integration-test-token"),
+                        bot_token_encrypted=encrypt_telegram_secret(
+                            "integration-test-token"
+                        ),
                         webhook_secret_hash=hashlib.sha256(
                             uuid4().hex.encode()
                         ).hexdigest(),
                         status="active",
                     )
                     session.add(platform_bot)
+                    platform_bot_created = True
                 else:
+                    platform_bot_snapshot = {
+                        "bot_id": platform_bot.bot_id,
+                        "bot_username": platform_bot.bot_username,
+                        "bot_token_encrypted": platform_bot.bot_token_encrypted,
+                        "webhook_secret_hash": platform_bot.webhook_secret_hash,
+                        "status": platform_bot.status,
+                    }
                     platform_bot.status = "active"
                     platform_bot.bot_token_encrypted = encrypt_telegram_secret(
                         "integration-test-token"
                     )
+                await session.flush()
+                platform_bot_id = platform_bot.id
+
                 session.add(
                     TelegramOwnerLink(
                         tenant_id=tenant_id,
                         owner_user_id=owner_id,
-                        invitation_hash=hashlib.sha256(uuid4().hex.encode()).hexdigest(),
+                        invitation_hash=hashlib.sha256(
+                            uuid4().hex.encode()
+                        ).hexdigest(),
                         expires_at=datetime.now(UTC) + timedelta(days=1),
                         chat_id=f"owner-chat-{uuid4().hex[:8]}",
                         linked_at=datetime.now(UTC),
@@ -183,9 +203,11 @@ async def test_committed_appointment_owner_notification_delivers_after_deactivat
 
         async def fake_send_text_message(*, bot_token, chat_id, body):
             sent.append((bot_token, chat_id, body))
-            return type("TelegramSendResult", (), {
-                "provider_message_id": "integration-provider-message"
-            })()
+            return type(
+                "TelegramSendResult",
+                (),
+                {"provider_message_id": "integration-provider-message"},
+            )()
 
         monkeypatch.setattr(
             "app.jobs.telegram_owner_notifications.send_text_message",
@@ -214,7 +236,9 @@ async def test_committed_appointment_owner_notification_delivers_after_deactivat
         async with AsyncSessionFactory() as session:
             tenant = await session.get(Tenant, tenant_id)
             appointment = await session.get(Appointment, appointment_id)
-            notification = await session.get(TelegramOwnerNotification, notification_id)
+            notification = await session.get(
+                TelegramOwnerNotification, notification_id
+            )
             assert tenant is not None and tenant.status == "deactivated"
             assert appointment is not None and appointment.status == "confirmed"
             assert notification is not None and notification.status == "sent"
@@ -223,4 +247,20 @@ async def test_committed_appointment_owner_notification_delivers_after_deactivat
             )
             assert notification.sent_at is not None
     finally:
+        async with AsyncSessionFactory() as session:
+            async with session.begin():
+                if tenant_id is not None:
+                    await session.execute(
+                        delete(Tenant).where(Tenant.id == tenant_id)
+                    )
+                if platform_bot_id is not None:
+                    platform_bot = await session.get(
+                        TelegramPlatformBot, platform_bot_id
+                    )
+                    if platform_bot_created:
+                        if platform_bot is not None:
+                            await session.delete(platform_bot)
+                    elif platform_bot is not None and platform_bot_snapshot is not None:
+                        for attribute, value in platform_bot_snapshot.items():
+                            setattr(platform_bot, attribute, value)
         get_settings.cache_clear()
