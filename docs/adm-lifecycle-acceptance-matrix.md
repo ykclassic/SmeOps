@@ -2,8 +2,8 @@
 
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
 **Candidate:** PR #72, branch `feature/adm-015-outbound-lifecycle`.  
-**Validated implementation head:** `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`.  
-**CI evidence:** GitHub Actions run #887 (`43588525957`) passed on the validated implementation head `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration and downgrade-safety checks, frontend type-check and production build passed. This CI result validates the implementation head before this matrix-reference-only commit; CI must be rerun for the resulting PR head.  
+**Candidate implementation head:** `843e668fce5940811789494461f96bd52769f5f2`.  
+**CI evidence:** GitHub Actions run #887 (`43588525957`) passed on baseline implementation head `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration and downgrade-safety checks, frontend type-check and production build passed. The current candidate head `843e668fce5940811789494461f96bd52769f5f2` has CI run #900 (`43589992059`) in progress; the new regressions below are not accepted until that exact-head run passes.  
 **Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior.
 
 ## Status definitions
@@ -26,13 +26,13 @@
 | WhatsApp conversation worker | Process | Skip without mutating conversation or creating outbound work | Same | Same | **PASS — automated candidate coverage.** `tests/test_whatsapp_worker_lifecycle.py`; all three inactive states parameterized. |
 | Telegram queued inbound worker | Process | Terminalize stale event | Same | Same | **PASS — automated candidate coverage.** `tests/test_telegram_lifecycle.py`; all three inactive states parameterized. |
 | Telegram conversation worker | Process | Skip before conversation processing | Same | Same | **PASS — automated candidate coverage.** `tests/test_telegram_lifecycle.py`; all three inactive states parameterized. |
-| Telegram webhook ingress and tenant-lock race | Persist/enqueue | Reject/ignore after lifecycle lock recheck | Covered by lifecycle ingress checks; broader mixed-state route proof is incomplete | Broader route proof is incomplete | **PARTIAL.** `tests/test_telegram_webhook_lifecycle_races.py` proves actual webhook route waits for deactivation and does not enqueue. Add explicit actual-route suspended/pending cases before treating every ingress state as exhaustively accepted. |
+| Telegram webhook ingress and tenant-lock race | Persist/enqueue | Reject/ignore after lifecycle lock recheck | Reject/ignore | Reject/ignore | **PENDING CI.** `tests/test_telegram_webhook_lifecycle_races.py::test_actual_telegram_webhook_routes_wait_for_inactive_tenant_and_do_not_enqueue` now parameterizes both platform and legacy routes across deactivated, suspended and pending, asserting the real PostgreSQL lock wait and zero persisted events/jobs.
 | Ordinary queued WhatsApp outbound | Deliver subject to provider policy | Suppress and mark failed | Suppress | Suppress | **PASS — automated.** `tests/test_whatsapp_outbound.py`. |
 | Preserved WhatsApp appointment outbound | Deliver subject to provider policy | Deliver if explicitly marked and otherwise provider rules permit | Suppress | Suppress | **PASS — worker policy automated; PARTIAL end-to-end event proof.** `tests/test_whatsapp_outbound.py` verifies preserved delivery and inactive-state suppression. The test does not yet prove every real booking/cancel/reschedule path creates the preservation flag. |
 | Ordinary queued Telegram outbound | Deliver | Suppress and mark failed | Suppress | Suppress | **PASS — automated.** `tests/test_telegram_outbound.py`. |
 | Preserved Telegram appointment outbound | Deliver | Deliver if explicitly marked | Suppress | Suppress | **PASS — worker policy automated; PARTIAL end-to-end event proof.** `tests/test_telegram_outbound.py` verifies preserved delivery and suspended/pending suppression. |
 | Telegram owner appointment alerts | Deliver | Deliver durable alerts for appointments committed before deactivation | Suppress | Suppress | **PASS — automated integration candidate.** `tests/test_appointment_notification_lifecycle.py` creates an appointment through REST, verifies its durable notification and job, deactivates the tenant, then runs the real worker with a stubbed provider and verifies delivery. |
-| Customer appointment confirmations / cancellation / reschedule replies | Deliver | Preserve only when atomically enqueued with successful appointment mutation | Suppress | Suppress | **PARTIAL.** Worker and enqueue-policy tests exist, but a complete real appointment-event → customer outbox → post-deactivation delivery integration test remains outstanding. |
+| Customer appointment confirmations / cancellation / reschedule replies | Deliver | Preserve only when atomically enqueued with successful appointment mutation | Suppress | Suppress | **PARTIAL; new integration test pending CI.** `tests/test_appointment_notification_lifecycle.py::test_customer_cancellation_reply_delivers_after_deactivation` drives the real Telegram customer cancellation conversation, verifies the committed appointment mutation and preserved customer outbox row, then executes the real outbound worker after deactivation. Booking-confirmation and reschedule variants, and WhatsApp customer delivery, remain separate coverage.
 | WhatsApp opt-out and service-window constraints | Enforced | Must not be bypassed by preservation flag | Enforced | Enforced | **PASS — automated policy tests** in `tests/test_whatsapp_outbound.py`; retain provider policy as an independent gate. |
 | Ambiguous external send outcome | Never blindly retry | Never blindly retry | Never blindly retry | Never blindly retry | **PASS — automated.** WhatsApp and Telegram worker tests retain `sending → unknown` handling. |
 | Deactivated owner authentication | Normal access while active | Lifecycle-only access; can reactivate with exact confirmation and fresh password | Cannot self-reactivate | Cannot self-reactivate | **PASS — automated.** `tests/test_owner_deactivation_api.py` and `tests/test_owner_reactivation_api.py`. |
@@ -52,6 +52,21 @@ The added test `tests/test_appointment_notification_lifecycle.py::test_committed
 
 This proves the REST appointment creation → durable owner notification/job → deactivation → worker delivery path. It does **not** prove customer-notification delivery or every Telegram/WhatsApp conversation-driven booking variant.
 
+
+### Customer-notification integration evidence
+
+The new test `tests/test_appointment_notification_lifecycle.py::test_customer_cancellation_reply_delivers_after_deactivation` exercises one real customer-facing event path:
+
+1. Creates a business, service, hours and confirmed appointment through the REST API.
+2. Persists a Telegram customer conversation in the cancellation-confirmation state and an inbound `YES` message.
+3. Runs the real Telegram conversation processor with only external bot-command provisioning stubbed.
+4. Verifies the appointment is cancelled and the customer reply outbox record is committed with `deliver_after_deactivation=true`.
+5. Deactivates the tenant through the lifecycle transition service.
+6. Runs the real Telegram outbound worker with only the provider send stubbed.
+7. Verifies the customer cancellation reply is sent while the tenant remains deactivated.
+
+This closes the end-to-end evidence gap for the Telegram customer cancellation path only. It does not certify booking-confirmation, reschedule, or WhatsApp customer-notification variants.
+
 ## Cross-cutting acceptance gates
 
 | Gate | Evidence | Status |
@@ -61,7 +76,7 @@ This proves the REST appointment creation → durable owner notification/job →
 | Provider calls outside DB transaction/row locks | Worker implementations commit the `sending` transition before provider calls; worker tests cover persisted status changes | **Code-reviewed; retain as independent review checkpoint** |
 | Worker commit-boundary race with actual writes | ADM-014 real WhatsApp processor/enqueue commit-boundary test | **PASS — automated** |
 | Outbound idempotency includes delivery-preservation policy | WhatsApp and Telegram enqueue regression tests | **PASS — automated** |
-| Queue retry/dead-letter and idempotency semantics | `tests/test_job_queue.py` plus channel worker idempotency/ambiguous-send tests | **PARTIAL — queue-wide lifecycle-specific dead-letter matrix still needs explicit review** |
+| Queue retry/dead-letter and idempotency semantics | `tests/test_job_queue.py::test_telegram_lifecycle_job_retries_then_dead_letters_after_max_attempts`; `tests/test_telegram_lifecycle.py::test_inactive_telegram_event_job_completes_without_retry_or_dead_letter`; existing queue idempotency and channel-worker ambiguous-send tests | **PARTIAL; new tests pending CI.** Covers a Telegram inbound lifecycle job's retry/dead-letter transition and proves lifecycle-suppressed stale work completes without retry. Extend/confirm equivalent WhatsApp job behavior and review cross-channel idempotency/lease recovery before full acceptance.
 | Tenant data and audit preservation | ADM-011 mutation snapshots and lifecycle service tests | **PASS — automated for tested records; not a deletion/retention certification** |
 | Audit append-only governance and platform audit stream | Separate Issue #64 | **OUT OF SCOPE / NOT ACCEPTED by ADM-014/015** |
 | Staging and production runtime acceptance | No deployment performed for this candidate | **NOT RUN** |
