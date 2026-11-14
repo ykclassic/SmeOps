@@ -15,10 +15,10 @@ from app.main import app
 from app.models import (
     Appointment,
     BackgroundJob,
-    TelegramOwnerLink,
     TelegramConversation,
     TelegramConversationMessage,
     TelegramOutboundMessage,
+    TelegramOwnerLink,
     TelegramOwnerNotification,
     TelegramPlatformBot,
     Tenant,
