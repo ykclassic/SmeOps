@@ -118,8 +118,9 @@ async def _wait_until_pid_is_blocked(waiting_pid: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_queued_whatsapp_event_is_terminalized_if_tenant_deactivated_before_worker():
-    tenant_id, event_id, job, _ = await _create_tenant_and_event(status="deactivated")
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended"])
+async def test_queued_whatsapp_event_is_terminalized_for_inactive_tenant(tenant_status):
+    tenant_id, event_id, job, _ = await _create_tenant_and_event(status=tenant_status)
 
     await whatsapp_jobs.accept_inbound_whatsapp_job(job)
 
@@ -197,25 +198,30 @@ async def test_whatsapp_accept_worker_waits_for_lifecycle_lock_and_discards_afte
 
 
 @pytest.mark.asyncio
-async def test_running_whatsapp_accept_worker_serializes_before_deactivation(monkeypatch):
-    tenant_id, event_id, job, _ = await _create_tenant_and_event(status="active")
-    entered_processing = asyncio.Event()
-    release_processing = asyncio.Event()
-
-    async def pause_processing(session, *, tenant_id, payload):
-        entered_processing.set()
-        await release_processing.wait()
-        return None
-
-    monkeypatch.setattr(
-        whatsapp_jobs,
-        "_process_inbound_message",
-        pause_processing,
+async def test_running_whatsapp_accept_worker_serializes_real_writes_before_deactivation(
+    monkeypatch,
+):
+    tenant_id, event_id, job, provider_message_id = await _create_tenant_and_event(
+        status="active"
     )
+    entered_enqueue = asyncio.Event()
+    release_enqueue = asyncio.Event()
+    original_enqueue_job = whatsapp_jobs.enqueue_job
+
+    async def pause_after_real_enqueue(*args, **kwargs):
+        result = await original_enqueue_job(*args, **kwargs)
+        entered_enqueue.set()
+        await release_enqueue.wait()
+        return result
+
+    # Let the real inbound processor create its conversation/message and the
+    # real queue helper persist the downstream job. Pause before the worker's
+    # commit so a concurrent lifecycle transaction must wait on the tenant row.
+    monkeypatch.setattr(whatsapp_jobs, "enqueue_job", pause_after_real_enqueue)
     worker_task = asyncio.create_task(
         whatsapp_jobs.accept_inbound_whatsapp_job(job)
     )
-    await asyncio.wait_for(entered_processing.wait(), timeout=5)
+    await asyncio.wait_for(entered_enqueue.wait(), timeout=5)
 
     async with AsyncSessionFactory() as lifecycle_session:
         lifecycle_pid = await lifecycle_session.scalar(text("SELECT pg_backend_pid()"))
@@ -226,7 +232,7 @@ async def test_running_whatsapp_accept_worker_serializes_before_deactivation(mon
         )
         await _wait_until_pid_is_blocked(lifecycle_pid)
 
-        release_processing.set()
+        release_enqueue.set()
         await asyncio.wait_for(worker_task, timeout=5)
         await asyncio.wait_for(lifecycle_task, timeout=5)
         tenant = await lifecycle_session.get(Tenant, tenant_id)
@@ -237,13 +243,40 @@ async def test_running_whatsapp_accept_worker_serializes_before_deactivation(mon
     async with AsyncSessionFactory() as session:
         event = await session.get(WhatsAppWebhookEvent, event_id)
         tenant = await session.get(Tenant, tenant_id)
+        conversations = await session.execute(
+            select(WhatsAppConversation).where(
+                WhatsAppConversation.tenant_id == tenant_id
+            )
+        )
+        messages = await session.execute(
+            select(WhatsAppConversationMessage).where(
+                WhatsAppConversationMessage.tenant_id == tenant_id,
+                WhatsAppConversationMessage.provider_message_id == provider_message_id,
+            )
+        )
+        downstream_jobs = await session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.tenant_id == tenant_id,
+                BackgroundJob.job_type == "whatsapp.process_conversation",
+            )
+        )
 
+    conversation_rows = conversations.scalars().all()
+    message_rows = messages.scalars().all()
+    job_rows = downstream_jobs.scalars().all()
     assert event is not None and event.status == "processed"
+    assert event.processed_at is not None
     assert tenant is not None and tenant.status == "deactivated"
+    assert len(conversation_rows) == 1
+    assert len(message_rows) == 1
+    assert len(job_rows) == 1
+    assert job_rows[0].payload["message_id"] == str(message_rows[0].id)
+    assert job_rows[0].payload["conversation_id"] == str(conversation_rows[0].id)
 
 
 @pytest.mark.asyncio
-async def test_whatsapp_conversation_worker_skips_inactive_tenant():
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended"])
+async def test_whatsapp_conversation_worker_skips_inactive_tenant(tenant_status):
     tenant_id = uuid4()
     conversation_id = uuid4()
     message_id = uuid4()
@@ -256,7 +289,7 @@ async def test_whatsapp_conversation_worker_skips_inactive_tenant():
                 id=tenant_id,
                 name="ADM-014 inactive conversation test",
                 slug=f"adm014-conv-{uuid4().hex[:16]}",
-                status="deactivated",
+                status=tenant_status,
                 business_timezone="Africa/Lagos",
             )
         )
