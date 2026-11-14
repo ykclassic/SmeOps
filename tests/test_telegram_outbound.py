@@ -158,7 +158,7 @@ async def test_telegram_worker_delivers_preserved_message_after_deactivation(mon
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tenant_status", ["suspended", "pending"])
-async def test_telegram_worker_suppresses_preserved_message_for_inactive_tenant(monkeypatch, tenant_status):
+async def test_telegram_worker_blocks_preserved_for_inactive_tenant(monkeypatch, tenant_status):
     from app.jobs import telegram_outbound as worker
     from app.jobs.queue import ClaimedJob
     tenant_id = uuid4()
