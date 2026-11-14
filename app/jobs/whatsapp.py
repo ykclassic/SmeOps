@@ -14,6 +14,7 @@ from app.core.whatsapp import (
 from app.db.session import AsyncSessionFactory
 from app.jobs.queue import ClaimedJob, enqueue_job
 from app.models import (
+    Tenant,
     WhatsAppConversation,
     WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
@@ -151,6 +152,19 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
         raise ValueError("Invalid webhook event job payload") from exc
 
     async with AsyncSessionFactory() as session:
+        # Shared lifecycle serialization mutex: always lock Tenant before the
+        # webhook event or any conversation rows. A job queued while active
+        # must not revive customer workflow after deactivation has committed.
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == job.tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise ValueError("Webhook event tenant no longer exists")
+
         result = await session.execute(
             select(WhatsAppWebhookEvent)
             .where(
@@ -166,6 +180,24 @@ async def accept_inbound_whatsapp_job(job: ClaimedJob) -> None:
             return
         if event.status != "queued":
             raise ValueError("Webhook event is not in a processable state")
+
+        if tenant.status != "active":
+            # Terminalize the durable event. Returning successfully lets the
+            # queue worker complete the claimed job instead of retrying work
+            # that must never resume for an inactive tenant.
+            inactive_status = tenant.status
+            event.status = "processed"
+            event.processed_at = datetime.now(UTC)
+            await session.commit()
+            logger.info(
+                "WhatsApp inbound event discarded for inactive tenant",
+                extra={
+                    "tenant_id": str(job.tenant_id),
+                    "event_id": str(event.id),
+                    "tenant_status": inactive_status,
+                },
+            )
+            return
 
         payload = json.loads(decrypt_whatsapp_secret(event.payload_encrypted))
 
