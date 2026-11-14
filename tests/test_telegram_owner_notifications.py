@@ -499,3 +499,29 @@ async def test_owner_appointment_alert_is_delivered_after_tenant_deactivation(mo
     assert len(sent) == 1
     assert notification.status == "sent"
     assert first.commits == 1 and second.commits == 1
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["suspended", "pending"])
+async def test_owner_appointment_alert_is_suppressed_for_platform_inactive_tenant(
+    monkeypatch, tenant_status
+):
+    tenant_id, notification_id = uuid4(), uuid4()
+    tenant = SimpleNamespace(id=tenant_id, status=tenant_status)
+    notification = SimpleNamespace(
+        id=notification_id, tenant_id=tenant_id, status="queued", last_error_code=None,
+    )
+    session = Session([tenant, notification])
+    class Context:
+        async def __aenter__(self): return session
+        async def __aexit__(self, *_args): return False
+    async def must_not_send(**_kwargs):
+        raise AssertionError("platform-inactive tenant owner alerts must be suppressed")
+    monkeypatch.setattr(notification_jobs, "AsyncSessionFactory", lambda: Context())
+    monkeypatch.setattr(notification_jobs, "send_text_message", must_not_send)
+    await notification_jobs.send_owner_appointment_alert_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant_id, job_type="telegram.owner_appointment_alert",
+        payload={"notification_id": str(notification_id)}, attempts=1, max_attempts=3,
+    ))
+    assert notification.status == "failed"
+    assert notification.last_error_code == "tenant_inactive"
+    assert session.commits == 1
