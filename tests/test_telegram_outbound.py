@@ -186,3 +186,65 @@ async def test_telegram_worker_suppresses_preserved_message_for_suspended_tenant
     assert message.last_error_code == "tenant_inactive"
     assert history.delivery_status == "failed"
     assert session.committed
+
+@pytest.mark.asyncio
+async def test_telegram_enqueue_rejects_inactive_tenant():
+    tenant_id = uuid4()
+    session = FakeSession([SimpleNamespace(id=tenant_id, status="deactivated")])
+    with pytest.raises(ValueError, match="only be queued for active businesses"):
+        await telegram_outbound.enqueue_telegram_text(
+            session, tenant_id=tenant_id, conversation_id=uuid4(),
+            body="Must not enqueue", idempotency_key="inactive-tenant-message",
+        )
+
+
+@pytest.mark.asyncio
+async def test_telegram_idempotency_includes_deactivation_delivery_policy(monkeypatch):
+    tenant_id, conversation_id = uuid4(), uuid4()
+    existing = SimpleNamespace(
+        conversation_id=conversation_id,
+        body_encrypted="cipher:Appointment confirmed",
+        reply_markup=None, deliver_after_deactivation=False,
+    )
+    session = FakeSession([SimpleNamespace(id=tenant_id, status="active"), existing])
+    monkeypatch.setattr(
+        telegram_outbound, "decrypt_telegram_secret", lambda value: value.removeprefix("cipher:")
+    )
+    with pytest.raises(telegram_outbound.TelegramOutboundIdempotencyConflict):
+        await telegram_outbound.enqueue_telegram_text(
+            session, tenant_id=tenant_id, conversation_id=conversation_id,
+            body="Appointment confirmed", idempotency_key="same-key",
+            deliver_after_deactivation=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_telegram_worker_suppresses_ordinary_message_after_deactivation(monkeypatch):
+    from app.jobs import telegram_outbound as worker
+    from app.jobs.queue import ClaimedJob
+    tenant_id = uuid4()
+    message = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, status="queued",
+        deliver_after_deactivation=False, provider_message_id=None, last_error_code=None,
+    )
+    history = SimpleNamespace(
+        provider_message_id=f"outbound:{message.id}", delivery_status="queued"
+    )
+    session = FakeSession([
+        SimpleNamespace(id=tenant_id, status="deactivated"), message, history
+    ])
+    class Context:
+        async def __aenter__(self): return session
+        async def __aexit__(self, *_args): return False
+    async def must_not_send(**_kwargs):
+        raise AssertionError("ordinary messages must not be sent after deactivation")
+    monkeypatch.setattr(worker, "AsyncSessionFactory", lambda: Context())
+    monkeypatch.setattr(worker, "send_text_message", must_not_send)
+    await worker.send_outbound_telegram_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant_id, job_type="telegram.send_text",
+        payload={"message_id": str(message.id)}, attempts=1, max_attempts=2,
+    ))
+    assert message.status == "failed"
+    assert message.last_error_code == "tenant_deactivated"
+    assert history.delivery_status == "failed"
+    assert session.committed
