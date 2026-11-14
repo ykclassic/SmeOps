@@ -2,8 +2,9 @@
 
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
 **Candidate:** follow-up acceptance branch `feature/adm-notification-acceptance`, based on merged PR #72.  
-**Last CI-verified implementation/test head:** `8ddccaae57c9db604931200fa01f9be3a896fc0a`.  
-**CI evidence:** implementation/test head `8ddccaae57c9db604931200fa01f9be3a896fc0a` passed CI run #919 (`43624760686`): 254 backend tests passed with 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration, downgrade-safety, frontend type-check and production build all passed. A subsequent documentation-only reconciliation is pending its own CI run.  
+**Implementation/test head:** `8ddccaae57c9db604931200fa01f9be3a896fc0a`.  
+**Current candidate head:** `b6467debc748cd3d167da7244ce9339cc3d0bb3e`.  
+**CI evidence:** implementation/test head `8ddccaae57c9db604931200fa01f9be3a896fc0a` passed CI run #919 (`43624760686`), with 254 backend tests, 2 Starlette deprecation warnings, Ruff, migration validation, metadata drift, populated-database migration, downgrade-safety, frontend type-check and production build all passing. The current candidate head, including this documentation reconciliation, passed CI run #921 (`43625304253`): 254 backend tests, 2 Starlette deprecation warnings, Ruff, migration validation, metadata drift, populated-database migration, downgrade-safety, frontend type-check and production build all passed.  
 **Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior. No controlled staging lifecycle smoke test has been run for this candidate.
 
 ## Status definitions
@@ -82,9 +83,9 @@ Each test checks the durable ledger state and tenant lifecycle state. These test
 
 Do not close Issues #58, #59 or #60 solely because the combined CI passes. Before closure, record:
 
-1. Independent review of the final combined PR #72 head.
-2. Successful CI for that exact head.
-3. Resolution or explicit acceptance of the partial rows above, especially actual Telegram ingress coverage for suspended/pending tenants, customer appointment-notification end-to-end delivery, and lifecycle-specific queue retry/dead-letter semantics.
+1. Independent review of PR #73 at its final exact head, including the notification integration tests and queue tests.
+2. Successful CI for that exact PR #73 head.
+3. Resolution or explicit acceptance of the remaining partial rows above: untested customer-notification channel/event combinations and channel-worker-specific retry/dead-letter/idempotency behavior. Telegram webhook ingress coverage for deactivated, suspended and pending tenants is covered by the cited automated tests.
 4. A staging acceptance run after an explicitly authorized deployment, with the feature flag still disabled unless a separate activation decision is approved.
 5. A final cross-channel acceptance record covering appointment/retail writes, Telegram/WhatsApp ingress and workers, outbound preservation/suppression, and owner lifecycle authentication.
 
