@@ -118,7 +118,7 @@ async def _wait_until_pid_is_blocked(waiting_pid: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended"])
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended", "pending"])
 async def test_queued_whatsapp_event_is_terminalized_for_inactive_tenant(tenant_status):
     tenant_id, event_id, job, _ = await _create_tenant_and_event(status=tenant_status)
 
