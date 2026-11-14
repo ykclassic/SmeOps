@@ -391,7 +391,7 @@ async def test_whatsapp_worker_delivers_preserved_confirmation_after_deactivatio
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tenant_status", ["suspended", "pending"])
-async def test_whatsapp_worker_suppresses_preserved_confirmation_for_non_deactivated_inactive_tenant(
+async def test_whatsapp_worker_suppresses_preserved_confirmation_for_inactive_tenant(
     monkeypatch, tenant_status
 ):
     tenant, _ = await create_connection()
@@ -436,6 +436,27 @@ async def test_whatsapp_enqueue_rejects_inactive_tenant(tenant_status):
                 body="Must not enqueue", idempotency_key=f"inactive:{uuid4()}",
             )
         assert exc_info.value.error_code == "tenant_inactive"
+    async with AsyncSessionFactory() as session:
+        await session.delete(await session.get(Tenant, tenant.id))
+        await session.commit()
+
+@pytest.mark.asyncio
+async def test_whatsapp_idempotency_includes_deactivation_delivery_policy():
+    tenant, _ = await create_connection()
+    key = f"policy-replay:{uuid4()}"
+    async with AsyncSessionFactory() as session:
+        await enqueue_whatsapp_text(
+            session, tenant_id=tenant.id, recipient="2348012345678",
+            body="Appointment confirmed", idempotency_key=key,
+            deliver_after_deactivation=False,
+        )
+    async with AsyncSessionFactory() as session:
+        with pytest.raises(OutboundIdempotencyConflict):
+            await enqueue_whatsapp_text(
+                session, tenant_id=tenant.id, recipient="2348012345678",
+                body="Appointment confirmed", idempotency_key=key,
+                deliver_after_deactivation=True,
+            )
     async with AsyncSessionFactory() as session:
         await session.delete(await session.get(Tenant, tenant.id))
         await session.commit()
