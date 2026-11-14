@@ -14,6 +14,7 @@ from app.core.whatsapp import (
 from app.jobs.queue import enqueue_job
 from app.models import (
     AuditEvent,
+    Tenant,
     WhatsAppConnection,
     WhatsAppConversation,
     WhatsAppConversationMessage,
@@ -40,10 +41,12 @@ def _matches_request(
     *,
     recipient: str,
     body: str,
+    deliver_after_deactivation: bool,
 ) -> bool:
     return (
         decrypt_whatsapp_secret(message.recipient_encrypted) == recipient
         and decrypt_whatsapp_secret(message.body_encrypted) == body
+        and bool(message.deliver_after_deactivation) == deliver_after_deactivation
     )
 
 
@@ -89,6 +92,7 @@ async def enqueue_whatsapp_text(
     body: str,
     idempotency_key: str,
     actor_user_id: UUID | None = None,
+    deliver_after_deactivation: bool = False,
 ) -> WhatsAppOutboundMessage:
     normalized_recipient = recipient.strip().lstrip("+")
     if not normalized_recipient.isdigit() or not 8 <= len(normalized_recipient) <= 15:
@@ -98,6 +102,20 @@ async def enqueue_whatsapp_text(
         raise ValueError("message body must contain 1 to 4096 characters")
     if not 1 <= len(idempotency_key) <= 160:
         raise ValueError("idempotency_key must contain 1 to 160 characters")
+
+    with session.no_autoflush:
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    tenant = tenant_result.scalar_one_or_none()
+    if tenant is None or tenant.status != "active":
+        raise OutboundPolicyViolation(
+            "tenant_inactive",
+            "Outbound messages can only be queued for active businesses.",
+        )
 
     existing_result = await session.execute(
         select(WhatsAppOutboundMessage).where(
@@ -111,6 +129,7 @@ async def enqueue_whatsapp_text(
             existing,
             recipient=normalized_recipient,
             body=normalized_body,
+            deliver_after_deactivation=deliver_after_deactivation,
         ):
             raise OutboundIdempotencyConflict(
                 "Idempotency key was used with different message content"
@@ -139,6 +158,7 @@ async def enqueue_whatsapp_text(
         body_encrypted=encrypt_whatsapp_secret(normalized_body),
         idempotency_key=idempotency_key,
         status="queued",
+        deliver_after_deactivation=deliver_after_deactivation,
     )
     try:
         async with session.begin_nested():
@@ -156,6 +176,7 @@ async def enqueue_whatsapp_text(
             duplicate,
             recipient=normalized_recipient,
             body=normalized_body,
+            deliver_after_deactivation=deliver_after_deactivation,
         ):
             raise OutboundIdempotencyConflict(
                 "Idempotency key was concurrently used with different message content"

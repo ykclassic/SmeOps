@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ class FakeSession:
         self.values = list(values)
         self.records = []
         self.committed = False
+        self.no_autoflush = nullcontext()
 
     async def execute(self, _statement):
         return FakeResult(self.values.pop(0))
@@ -52,8 +54,9 @@ async def test_enqueue_telegram_text_creates_ledger_history_and_job(monkeypatch)
         tenant_id=tenant_id,
         telegram_chat_id="-100123456789",
     )
-    connection = SimpleNamespace(tenant_id=tenant_id, status="active")
-    session = FakeSession([None, conversation, connection])
+    tenant = SimpleNamespace(id=tenant_id, status="active")
+    platform_bot = SimpleNamespace(singleton_key="platform", status="active")
+    session = FakeSession([tenant, None, conversation, platform_bot])
     queued = []
 
     async def fake_enqueue(_session, **kwargs):
@@ -89,8 +92,10 @@ async def test_enqueue_telegram_text_rejects_reused_key_with_different_content(m
     existing = SimpleNamespace(
         conversation_id=uuid4(),
         body_encrypted="ciphertext",
+        deliver_after_deactivation=False,
     )
-    session = FakeSession([existing])
+    tenant_id = uuid4()
+    session = FakeSession([SimpleNamespace(id=tenant_id, status="active"), existing])
     monkeypatch.setattr(
         telegram_outbound,
         "decrypt_telegram_secret",
@@ -100,8 +105,147 @@ async def test_enqueue_telegram_text_rejects_reused_key_with_different_content(m
     with pytest.raises(telegram_outbound.TelegramOutboundIdempotencyConflict):
         await telegram_outbound.enqueue_telegram_text(
             session,
-            tenant_id=uuid4(),
+            tenant_id=tenant_id,
             conversation_id=uuid4(),
             body="different content",
             idempotency_key="telegram-idempotency-1",
         )
+
+
+
+@pytest.mark.asyncio
+async def test_telegram_worker_delivers_preserved_message_after_deactivation(monkeypatch):
+    from app.jobs import telegram_outbound as worker
+    from app.jobs.queue import ClaimedJob
+    tenant_id = uuid4()
+    message = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, status="queued", deliver_after_deactivation=True,
+        recipient_chat_id="998877", body_encrypted="cipher:Appointment confirmed",
+        reply_markup=None, provider_message_id=None, last_error_code=None, sent_at=None,
+    )
+    history = SimpleNamespace(
+        provider_message_id=f"outbound:{message.id}", delivery_status="queued"
+    )
+    bot = SimpleNamespace(bot_token_encrypted="cipher:token")
+    first, second = FakeSession([
+        SimpleNamespace(id=tenant_id, status="deactivated"), message, bot
+    ]), FakeSession([message, history])
+
+    class Context:
+        def __init__(self, session): self.session = session
+        async def __aenter__(self): return self.session
+        async def __aexit__(self, *_args): return False
+
+    sessions = iter([first, second])
+    monkeypatch.setattr(worker, "AsyncSessionFactory", lambda: Context(next(sessions)))
+    monkeypatch.setattr(
+        worker, "decrypt_telegram_secret", lambda v: v.removeprefix("cipher:")
+    )
+    sent = []
+    async def fake_send(**kwargs):
+        sent.append(kwargs)
+        return SimpleNamespace(provider_message_id="provider-123")
+    monkeypatch.setattr(worker, "send_text_message", fake_send)
+    await worker.send_outbound_telegram_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant_id, job_type="telegram.send_text",
+        payload={"message_id": str(message.id)}, attempts=1, max_attempts=2,
+    ))
+    assert len(sent) == 1
+    assert message.status == "sent"
+    assert history.delivery_status == "sent"
+    assert first.committed and second.committed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tenant_status", ["suspended", "pending"])
+async def test_telegram_worker_blocks_preserved_for_inactive_tenant(monkeypatch, tenant_status):
+    from app.jobs import telegram_outbound as worker
+    from app.jobs.queue import ClaimedJob
+    tenant_id = uuid4()
+    message = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, status="queued", deliver_after_deactivation=True,
+        provider_message_id=None, last_error_code=None,
+    )
+    history = SimpleNamespace(
+        provider_message_id=f"outbound:{message.id}", delivery_status="queued"
+    )
+    session = FakeSession([SimpleNamespace(id=tenant_id, status=tenant_status), message, history])
+
+    class Context:
+        async def __aenter__(self): return session
+        async def __aexit__(self, *_args): return False
+
+    monkeypatch.setattr(worker, "AsyncSessionFactory", lambda: Context())
+    async def must_not_send(**_kwargs):
+        raise AssertionError("suspended tenant messages must be suppressed")
+    monkeypatch.setattr(worker, "send_text_message", must_not_send)
+    await worker.send_outbound_telegram_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant_id, job_type="telegram.send_text",
+        payload={"message_id": str(message.id)}, attempts=1, max_attempts=2,
+    ))
+    assert message.status == "failed"
+    assert message.last_error_code == "tenant_inactive"
+    assert history.delivery_status == "failed"
+    assert session.committed
+
+@pytest.mark.asyncio
+async def test_telegram_enqueue_rejects_inactive_tenant():
+    tenant_id = uuid4()
+    session = FakeSession([SimpleNamespace(id=tenant_id, status="deactivated")])
+    with pytest.raises(ValueError, match="only be queued for active businesses"):
+        await telegram_outbound.enqueue_telegram_text(
+            session, tenant_id=tenant_id, conversation_id=uuid4(),
+            body="Must not enqueue", idempotency_key="inactive-tenant-message",
+        )
+
+
+@pytest.mark.asyncio
+async def test_telegram_idempotency_includes_deactivation_delivery_policy(monkeypatch):
+    tenant_id, conversation_id = uuid4(), uuid4()
+    existing = SimpleNamespace(
+        conversation_id=conversation_id,
+        body_encrypted="cipher:Appointment confirmed",
+        reply_markup=None, deliver_after_deactivation=False,
+    )
+    session = FakeSession([SimpleNamespace(id=tenant_id, status="active"), existing])
+    monkeypatch.setattr(
+        telegram_outbound, "decrypt_telegram_secret", lambda value: value.removeprefix("cipher:")
+    )
+    with pytest.raises(telegram_outbound.TelegramOutboundIdempotencyConflict):
+        await telegram_outbound.enqueue_telegram_text(
+            session, tenant_id=tenant_id, conversation_id=conversation_id,
+            body="Appointment confirmed", idempotency_key="same-key",
+            deliver_after_deactivation=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_telegram_worker_suppresses_ordinary_message_after_deactivation(monkeypatch):
+    from app.jobs import telegram_outbound as worker
+    from app.jobs.queue import ClaimedJob
+    tenant_id = uuid4()
+    message = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, status="queued",
+        deliver_after_deactivation=False, provider_message_id=None, last_error_code=None,
+    )
+    history = SimpleNamespace(
+        provider_message_id=f"outbound:{message.id}", delivery_status="queued"
+    )
+    session = FakeSession([
+        SimpleNamespace(id=tenant_id, status="deactivated"), message, history
+    ])
+    class Context:
+        async def __aenter__(self): return session
+        async def __aexit__(self, *_args): return False
+    async def must_not_send(**_kwargs):
+        raise AssertionError("ordinary messages must not be sent after deactivation")
+    monkeypatch.setattr(worker, "AsyncSessionFactory", lambda: Context())
+    monkeypatch.setattr(worker, "send_text_message", must_not_send)
+    await worker.send_outbound_telegram_job(ClaimedJob(
+        id=uuid4(), tenant_id=tenant_id, job_type="telegram.send_text",
+        payload={"message_id": str(message.id)}, attempts=1, max_attempts=2,
+    ))
+    assert message.status == "failed"
+    assert message.last_error_code == "tenant_deactivated"
+    assert history.delivery_status == "failed"
+    assert session.committed

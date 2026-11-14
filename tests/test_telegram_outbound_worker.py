@@ -62,7 +62,8 @@ async def test_outbound_worker_sends_and_updates_durable_ledger(monkeypatch):
         provider_message_id=f"outbound:{message_id}",
         delivery_status="queued",
     )
-    first = FakeSession([message, connection])
+    tenant = SimpleNamespace(id=tenant_id, status="active")
+    first = FakeSession([tenant, message, connection])
     second = FakeSession([message, history])
     sessions = iter([first, second])
     sent = []
@@ -117,7 +118,8 @@ async def test_outbound_worker_does_not_resend_ambiguous_sending_record(monkeypa
         provider_message_id=f"outbound:{message_id}",
         delivery_status="sending",
     )
-    session = FakeSession([message, history])
+    tenant = SimpleNamespace(id=tenant_id, status="active")
+    session = FakeSession([tenant, message, history])
     sent = False
 
     def fake_session_factory():

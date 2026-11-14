@@ -14,6 +14,7 @@ from app.integrations.whatsapp_cloud import (
 )
 from app.jobs.queue import ClaimedJob
 from app.models import (
+    Tenant,
     WhatsAppConnection,
     WhatsAppConversationMessage,
     WhatsAppOutboundMessage,
@@ -33,6 +34,15 @@ async def send_outbound_whatsapp_job(job: ClaimedJob) -> None:
         raise ValueError("Invalid outbound WhatsApp job payload") from exc
 
     async with AsyncSessionFactory() as session:
+        tenant_result = await session.execute(
+            select(Tenant)
+            .where(Tenant.id == job.tenant_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise ValueError("Outbound WhatsApp tenant does not exist")
         result = await session.execute(
             select(WhatsAppOutboundMessage)
             .where(
@@ -55,6 +65,29 @@ async def send_outbound_whatsapp_job(job: ClaimedJob) -> None:
             return
         if message.status != "queued":
             raise ValueError("Outbound WhatsApp message is not in a sendable state")
+
+        if tenant.status != "active" and not (
+            tenant.status == "deactivated" and message.deliver_after_deactivation
+        ):
+            message.status = "failed"
+            message.last_error_code = (
+                "tenant_deactivated"
+                if tenant.status == "deactivated"
+                else "tenant_inactive"
+            )
+            history_result = await session.execute(
+                select(WhatsAppConversationMessage)
+                .where(
+                    WhatsAppConversationMessage.tenant_id == job.tenant_id,
+                    WhatsAppConversationMessage.provider_message_id == f"outbound:{message.id}",
+                )
+                .with_for_update()
+            )
+            history_message = history_result.scalar_one_or_none()
+            if history_message is not None:
+                history_message.delivery_status = "failed"
+            await session.commit()
+            return
 
         connection_result = await session.execute(
             select(WhatsAppConnection).where(

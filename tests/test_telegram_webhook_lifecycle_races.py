@@ -72,9 +72,11 @@ def _telegram_request(path: str, payload: dict, secret: str) -> Request:
 
 
 @pytest.mark.parametrize("route_kind", ["platform", "legacy"])
+@pytest.mark.parametrize("tenant_status", ["deactivated", "suspended", "pending"])
 @pytest.mark.asyncio
-async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_enqueue(
+async def test_actual_telegram_webhook_routes_wait_for_inactive_tenant_and_do_not_enqueue(
     route_kind: str,
+    tenant_status: str,
 ):
     tenant_id = uuid4()
     chat_id = str(810000000 + (uuid4().int % 100000000))
@@ -140,8 +142,8 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
                 # Hold the tenant mutex while deactivation wins. The webhook
                 # request must block here and re-read the committed inactive state.
                 await lifecycle_session.execute(
-                    text("UPDATE tenants SET status = 'deactivated' WHERE id = :id"),
-                    {"id": tenant_id},
+                    text("UPDATE tenants SET status = :status WHERE id = :id"),
+                    {"id": tenant_id, "status": tenant_status},
                 )
 
                 request_started = asyncio.Event()
@@ -197,7 +199,7 @@ async def test_actual_telegram_webhook_routes_wait_for_deactivation_and_do_not_e
                 )
             ) == 0
             tenant = await verify.get(Tenant, tenant_id)
-            assert tenant is not None and tenant.status == "deactivated"
+            assert tenant is not None and tenant.status == tenant_status
     finally:
         async with AsyncSessionFactory() as cleanup:
             async with cleanup.begin():

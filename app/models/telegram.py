@@ -4,6 +4,7 @@ from typing import Literal
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -181,6 +182,9 @@ class TelegramOutboundMessage(UUIDPrimaryKey, TimestampMixin, Base):
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[Literal["queued", "sending", "sent", "failed", "unknown"]] = mapped_column(
         String(16), nullable=False, default="queued", server_default=text("'queued'")
+    )
+    deliver_after_deactivation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     provider_message_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
