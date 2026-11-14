@@ -2,8 +2,8 @@
 
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
 **Candidate:** PR #72, branch `feature/adm-015-outbound-lifecycle`.  
-**Validated implementation head:** `7f1ad3ef1c69df315fddff0311d3f6ee3b41faa6`.  
-**CI evidence:** GitHub Actions run #884 (`43588401850`) passed on that head: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration checks, frontend type-check and production build passed. The matrix document revision itself is documentation-only; verify CI for the latest PR head before merge.  
+**Validated implementation head:** `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`.  
+**CI evidence:** GitHub Actions run #887 (`43588525957`) passed on the validated implementation head `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration and downgrade-safety checks, frontend type-check and production build passed. This CI result validates the implementation head before this matrix-reference-only commit; CI must be rerun for the resulting PR head.  
 **Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior.
 
 ## Status definitions
