@@ -1,16 +1,16 @@
 import asyncio
 from contextlib import nullcontext
-from types import SimpleNamespace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, text
 
 from app.api.telegram import _lock_active_telegram_tenant
+from app.core.telegram import encrypt_telegram_secret
 from app.db.session import AsyncSessionFactory
 from app.jobs import telegram as telegram_jobs
-from app.core.telegram import encrypt_telegram_secret
 from app.jobs.queue import ClaimedJob, complete_job, enqueue_job
 from app.models import (
     AuditEvent,
