@@ -1,10 +1,10 @@
 # Tenant Lifecycle Acceptance Matrix
 
 **Scope:** ADM-007 through ADM-015 backend lifecycle enforcement, with emphasis on ADM-011–ADM-015 integration.  
-**Candidate:** PR #72, branch `feature/adm-015-outbound-lifecycle`.  
-**Candidate implementation head:** `843e668fce5940811789494461f96bd52769f5f2`.  
-**CI evidence:** GitHub Actions run #887 (`43588525957`) passed on baseline implementation head `5d7447d635f6fd634cc47c0e7ecaf5202cddf4c3`: 240 backend tests, 2 Starlette deprecation warnings; Ruff, migration validation, metadata drift, populated-database migration and downgrade-safety checks, frontend type-check and production build passed. The current code/test head `843e668fce5940811789494461f96bd52769f5f2` passed CI run #900 (`43589992059`): 249 backend tests, 2 Starlette deprecation warnings, Ruff, migration checks, frontend type-check and production build all passed. Matrix/documentation revision `7dbb17c0bd0d6301a92903d4b756ce9cc2b8ab6a` is being revalidated by CI run #902 (`43590044602`); that run remains in progress at the time of this matrix update.  
-**Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior.
+**Candidate:** follow-up acceptance branch `feature/adm-notification-acceptance`, based on merged PR #72.  
+**Candidate implementation head:** pending CI for `feature/adm-notification-acceptance`.  
+**CI evidence:** PR #72's final candidate passed CI run #904 (`43590141871`). This follow-up branch adds three end-to-end notification tests and WhatsApp queue retry/dead-letter coverage; its CI has not yet run.  
+**Environment:** automated CI against PostgreSQL and the test application. This matrix does not certify staging or production runtime behavior. The staging database migration to `0024_outbound_lifecycle_policy` and both `deliver_after_deactivation` columns were independently verified, but targeted lifecycle staging acceptance remains unrun.
 
 ## Status definitions
 
@@ -55,17 +55,13 @@ This proves the REST appointment creation → durable owner notification/job →
 
 ### Customer-notification integration evidence
 
-The new test `tests/test_appointment_notification_lifecycle.py::test_customer_cancellation_reply_delivers_after_deactivation` exercises one real customer-facing event path:
+The integration tests now cover three event paths:
 
-1. Creates a business, service, hours and confirmed appointment through the REST API.
-2. Persists a Telegram customer conversation in the cancellation-confirmation state and an inbound `YES` message.
-3. Runs the real Telegram conversation processor with only external bot-command provisioning stubbed.
-4. Verifies the appointment is cancelled and the customer reply outbox record is committed with `deliver_after_deactivation=true`.
-5. Deactivates the tenant through the lifecycle transition service.
-6. Runs the real Telegram outbound worker with only the provider send stubbed.
-7. Verifies the customer cancellation reply is sent while the tenant remains deactivated.
+- `test_customer_cancellation_reply_delivers_after_deactivation`: a committed Telegram cancellation is followed by the real Telegram outbound worker after deactivation.
+- `test_customer_reschedule_reply_delivers_after_deactivation`: a committed Telegram reschedule is followed by the real Telegram outbound worker after deactivation; the appointment remains confirmed at its new start time.
+- `test_whatsapp_booking_confirmation_delivers_after_deactivation`: the real WhatsApp conversation processor commits an appointment and preserved customer outbox record; after deactivation, the real WhatsApp outbound worker sends it through a stubbed provider boundary.
 
-This closes the end-to-end evidence gap for the Telegram customer cancellation path only. It does not certify booking-confirmation, reschedule, or WhatsApp customer-notification variants.
+Each test checks the durable ledger state and tenant lifecycle state. These tests stub only external provider/provisioning calls, not the conversation processor, enqueue service, lifecycle transition service, or outbound worker.
 
 ## Cross-cutting acceptance gates
 
