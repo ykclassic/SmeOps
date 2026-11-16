@@ -813,7 +813,7 @@ export default function HomePage() {
             <h1>Your workspace is <em>paused.</em></h1>
             <p>Your appointments and customer records are preserved. Reactivate this business account to restore normal dashboard access.</p>
           </div>
-          <div className="auth-footnote">Only the active owner can reactivate this account.</div>
+          <div className="auth-footnote">Only the active owner can reactivate this account. <button type="button" className="text-button" onClick={logout}>Sign out</button></div>
         </section>
         <section className="auth-panel">
           <form className="auth-card lifecycle-form" onSubmit={submitReactivation}>
