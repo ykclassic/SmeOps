@@ -43,3 +43,33 @@ test("deactivated owner is limited to the reactivation flow", async ({ page }) =
     reason: "Owner initiated reactivation from the SmeOps dashboard",
   });
 });
+
+
+test("deactivation remains backend-gated and does not log out an active owner on rejection", async ({ page }) => {
+  test.skip(!process.env.E2E_DASHBOARD_URL, "E2E_DASHBOARD_URL is required");
+  let deactivationCalls = 0;
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace(/^\/api\//, "");
+    if (path === "auth/me") return route.fulfill({ status: 200, json: { id: "owner-1", tenant_id: "tenant-1", email: "owner@example.com", role: "owner" } });
+    if (path === "account/lifecycle") return route.fulfill({ status: 200, json: { status: "active", tenant_id: "tenant-1" } });
+    if (path === "account/deactivate" && request.method() === "POST") {
+      deactivationCalls += 1;
+      return route.fulfill({ status: 404, json: { detail: "Not found" } });
+    }
+    if (path === "services" || path.startsWith("appointments") || path === "business-hours" || path.startsWith("whatsapp/conversations")) return route.fulfill({ status: 200, json: [] });
+    if (path === "whatsapp/connection") return route.fulfill({ status: 200, json: null });
+    if (path === "telegram/owner-link") return route.fulfill({ status: 200, json: { linked: false, status: "disconnected" } });
+    if (path === "telegram/booking-link") return route.fulfill({ status: 200, json: { connected: false, booking_link: null } });
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Account management" }).click();
+  await page.getByLabel("Type DEACTIVATE to confirm").fill("DEACTIVATE");
+  await page.getByLabel("Current account password").fill("Correct-Horse-Battery-42");
+  await page.getByRole("button", { name: "Deactivate business account" }).click();
+  await expect(page.getByRole("alert")).toContainText("Account deactivation is currently unavailable");
+  await expect(page.getByRole("button", { name: "Appointments" })).toBeVisible();
+  expect(deactivationCalls).toBe(1);
+});
