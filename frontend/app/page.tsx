@@ -491,8 +491,14 @@ export default function HomePage() {
         const identity = await api<User>("auth/me");
         const lifecycle = await api<LifecycleStatus>("account/lifecycle").catch(() => null);
         if (!mounted) return;
-        setUser(identity);
-        if (lifecycle) setLifecycleStatus(lifecycle.status);
+        if (lifecycle?.status === "deactivated") {
+          setLifecycleStatus("deactivated");
+          setLifecycleOnly(true);
+          setUser(null);
+        } else {
+          setUser(identity);
+          if (lifecycle) setLifecycleStatus(lifecycle.status);
+        }
       } catch {
         // Ordinary dashboard authentication intentionally rejects deactivated
         // tenants. Probe the restricted lifecycle endpoint before showing login.
@@ -709,6 +715,15 @@ export default function HomePage() {
   async function refresh() {
     setBusy(true);
     try {
+      const lifecycle = await api<LifecycleStatus>("account/lifecycle").catch(() => null);
+      if (lifecycle) {
+        setLifecycleStatus(lifecycle.status);
+        if (lifecycle.status === "deactivated") {
+          setLifecycleOnly(true);
+          setUser(null);
+          return;
+        }
+      }
       await loadDashboard();
       setNotice("Workspace data refreshed.");
     } catch (reason) {
