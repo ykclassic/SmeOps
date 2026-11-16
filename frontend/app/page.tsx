@@ -932,7 +932,7 @@ export default function HomePage() {
         </header>
 
         <div className="page-content">
-          {error && <div className="alert alert-error"><span>{error}</span><button onClick={() => setError("")}>×</button></div>}
+          {error && <div className="alert alert-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
           {notice && <div className="alert alert-success"><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
 
           {tab === "overview" && (
