@@ -268,3 +268,23 @@ td strong { display: block; color: var(--ink); font-size: 11px; }
 .embedded-form { max-width: 420px; padding: 14px 0 0; }
 
 .disconnect-button { grid-column: 1 / -1; justify-self: start; }
+
+
+.lifecycle-card { margin-bottom: 18px; }
+.lifecycle-status-row { display: flex; align-items: center; gap: 10px; margin: 18px 0; padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: #fbfdfb; }
+.lifecycle-status-row strong { font-size: 13px; }
+.lifecycle-warning { padding: 15px 17px; border: 1px solid #e4eee6; border-radius: 10px; background: #f6faf6; }
+.lifecycle-warning strong { color: var(--green-dark); font-size: 12px; }
+.lifecycle-warning p { margin: 7px 0 0; color: #64736a; font-size: 12px; line-height: 1.7; }
+.lifecycle-danger-zone { border-color: #f0dddd; }
+.lifecycle-form { display: grid; gap: 4px; width: min(100%, 460px); margin-top: 20px; }
+.lifecycle-form label { margin-bottom: 12px; }
+.lifecycle-submit { justify-self: start; min-height: 40px; padding: 9px 14px; }
+.lifecycle-danger-zone .lifecycle-submit { border-color: #e8caca; background: #fff5f4; color: #a23f3f; }
+.lifecycle-danger-zone .lifecycle-submit:hover:not(:disabled) { border-color: #d9aaaa; background: #ffefed; }
+@media (max-width: 680px) {
+  .lifecycle-card { padding: 18px; }
+  .lifecycle-warning { padding: 13px; }
+  .lifecycle-form { width: 100%; }
+  .lifecycle-submit { width: 100%; }
+}
