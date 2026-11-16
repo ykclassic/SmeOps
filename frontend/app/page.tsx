@@ -701,6 +701,9 @@ export default function HomePage() {
 
   async function logout() {
     await api("auth/logout", { method: "POST" }).catch(() => undefined);
+    setLifecycleOnly(false);
+    setLifecycleStatus(null);
+    setReactivationForm({ confirmation: "", password: "" });
     setUser(null);
     setServices([]);
     setAppointments([]);
