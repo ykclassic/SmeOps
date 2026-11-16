@@ -57,7 +57,9 @@ type Connection = {
 
 type TelegramOwnerStatus = { linked: boolean; status: string; linked_at?: string | null };
 type TelegramBookingStatus = { connected: boolean; booking_link: string | null; status?: string };
-type Tab = "overview" | "appointments" | "inbox" | "services" | "hours" | "whatsapp" | "telegram";
+type LifecycleStatus = { status: "active" | "deactivated"; tenant_id: string };
+type LifecycleTransitionResponse = LifecycleStatus & { changed: boolean };
+type Tab = "overview" | "appointments" | "inbox" | "services" | "hours" | "whatsapp" | "telegram" | "account";
 
 type FacebookLoginResponse = {
   authResponse?: { code?: string };
@@ -172,6 +174,10 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [lifecycleStatus, setLifecycleStatus] = useState<LifecycleStatus["status"] | null>(null);
+  const [lifecycleOnly, setLifecycleOnly] = useState(false);
+  const [deactivationForm, setDeactivationForm] = useState({ confirmation: "", password: "" });
+  const [reactivationForm, setReactivationForm] = useState({ confirmation: "", password: "" });
 
   const completeSignup = useCallback(async () => {
     const signup = signupPartsRef.current;
@@ -480,16 +486,35 @@ export default function HomePage() {
 
   useEffect(() => {
     let mounted = true;
-    api<User>("auth/me")
-      .then((identity) => {
-        if (mounted) setUser(identity);
-      })
-      .catch(() => {
-        if (mounted) setUser(null);
-      })
-      .finally(() => {
+    const restoreSession = async () => {
+      try {
+        const identity = await api<User>("auth/me");
+        const lifecycle = await api<LifecycleStatus>("account/lifecycle").catch(() => null);
+        if (!mounted) return;
+        if (lifecycle?.status === "deactivated") {
+          setLifecycleStatus("deactivated");
+          setLifecycleOnly(true);
+          setUser(null);
+        } else {
+          setUser(identity);
+          if (lifecycle) setLifecycleStatus(lifecycle.status);
+        }
+      } catch {
+        // Ordinary dashboard authentication intentionally rejects deactivated
+        // tenants. Probe the restricted lifecycle endpoint before showing login.
+        const lifecycle = await api<LifecycleStatus>("account/lifecycle").catch(() => null);
+        if (!mounted) return;
+        if (lifecycle?.status === "deactivated") {
+          setLifecycleStatus("deactivated");
+          setLifecycleOnly(true);
+        } else {
+          setUser(null);
+        }
+      } finally {
         if (mounted) setLoading(false);
-      });
+      }
+    };
+    void restoreSession();
     return () => {
       mounted = false;
     };
@@ -537,7 +562,16 @@ export default function HomePage() {
             : authForm,
         ),
       });
+      const lifecycle = await api<LifecycleStatus>("account/lifecycle").catch(() => null);
+      if (lifecycle?.status === "deactivated") {
+        setLifecycleStatus("deactivated");
+        setLifecycleOnly(true);
+        setUser(null);
+        setNotice("This business account is deactivated. Reactivate it to restore dashboard access.");
+        return;
+      }
       const identity = await api<User>("auth/me");
+      setLifecycleStatus(lifecycle?.status ?? "active");
       setUser(identity);
       setNotice(authMode === "register" ? "Business workspace created." : "Signed in.");
     } catch (reason) {
@@ -595,8 +629,81 @@ export default function HomePage() {
     }
   }
 
+  async function submitDeactivation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (deactivationForm.confirmation !== "DEACTIVATE") return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<LifecycleTransitionResponse>("account/deactivate", {
+        method: "POST",
+        body: JSON.stringify({
+          confirmation: deactivationForm.confirmation,
+          password: deactivationForm.password,
+          reason: "Owner initiated deactivation from the SmeOps dashboard",
+        }),
+      });
+      setLifecycleStatus(result.status);
+      setDeactivationForm({ confirmation: "", password: "" });
+      setLifecycleOnly(true);
+      setUser(null);
+      setServices([]);
+      setAppointments([]);
+      setConversations([]);
+      setMessages([]);
+      setConnection(null);
+      setTelegramOwner({ linked: false, status: "disconnected" });
+      setTelegramBooking({ connected: false, booking_link: null });
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "";
+      setError(
+        message === "Not found"
+          ? "Account deactivation is currently unavailable. The backend safeguard rejected the request; your account remains active and no account data was changed."
+          : message || "Could not deactivate this account",
+      );
+    } finally {
+      setBusy(false);
+      setDeactivationForm((current) => ({ ...current, password: "" }));
+    }
+  }
+
+  async function submitReactivation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (reactivationForm.confirmation !== "REACTIVATE") return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<LifecycleTransitionResponse>("account/reactivate", {
+        method: "POST",
+        body: JSON.stringify({
+          confirmation: reactivationForm.confirmation,
+          password: reactivationForm.password,
+          reason: "Owner initiated reactivation from the SmeOps dashboard",
+        }),
+      });
+      setLifecycleStatus(result.status);
+      setLifecycleOnly(false);
+      setReactivationForm({ confirmation: "", password: "" });
+      try {
+        const identity = await api<User>("auth/me");
+        setUser(identity);
+        setNotice("Your business account is active again. Dashboard access has been restored.");
+      } catch {
+        setError("Your account was reactivated, but this session could not be restored. Sign in again to continue.");
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not reactivate this account");
+    } finally {
+      setBusy(false);
+      setReactivationForm((current) => ({ ...current, password: "" }));
+    }
+  }
+
   async function logout() {
     await api("auth/logout", { method: "POST" }).catch(() => undefined);
+    setLifecycleOnly(false);
+    setLifecycleStatus(null);
+    setReactivationForm({ confirmation: "", password: "" });
     setUser(null);
     setServices([]);
     setAppointments([]);
@@ -611,6 +718,15 @@ export default function HomePage() {
   async function refresh() {
     setBusy(true);
     try {
+      const lifecycle = await api<LifecycleStatus>("account/lifecycle").catch(() => null);
+      if (lifecycle) {
+        setLifecycleStatus(lifecycle.status);
+        if (lifecycle.status === "deactivated") {
+          setLifecycleOnly(true);
+          setUser(null);
+          return;
+        }
+      }
       await loadDashboard();
       setNotice("Workspace data refreshed.");
     } catch (reason) {
@@ -705,6 +821,40 @@ export default function HomePage() {
     return <main className="loading-screen"><span className="brand-mark">S</span><p>Loading SmeOps…</p></main>;
   }
 
+  if (lifecycleOnly && lifecycleStatus === "deactivated") {
+    return (
+      <main className="auth-shell">
+        <section className="auth-aside">
+          <div className="brand-lockup"><span className="brand-mark">S</span><span>SmeOps</span></div>
+          <div className="auth-copy">
+            <span className="eyebrow">ACCOUNT ACCESS</span>
+            <h1>Your workspace is <em>paused.</em></h1>
+            <p>Your appointments and customer records are preserved. Reactivate this business account to restore normal dashboard access.</p>
+          </div>
+          <div className="auth-footnote">Only the active owner can reactivate this account. <button type="button" className="text-button" onClick={logout}>Sign out</button></div>
+        </section>
+        <section className="auth-panel">
+          <form className="auth-card lifecycle-form" onSubmit={submitReactivation}>
+            <span className="pill pill-amber">Account deactivated</span>
+            <h2>Your account is deactivated</h2>
+            <p className="muted">This restricted screen is available only for account reactivation. Ordinary business operations remain unavailable until reactivation succeeds.</p>
+            <label>Type REACTIVATE to confirm
+              <input required autoComplete="off" value={reactivationForm.confirmation} onChange={(event) => setReactivationForm({ ...reactivationForm, confirmation: event.target.value })} placeholder="REACTIVATE" />
+            </label>
+            <label>Current account password
+              <input required type="password" minLength={12} maxLength={128} autoComplete="current-password" value={reactivationForm.password} onChange={(event) => setReactivationForm({ ...reactivationForm, password: event.target.value })} placeholder="Enter your current password" />
+            </label>
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <button className="button button-primary full-width" disabled={busy || reactivationForm.confirmation !== "REACTIVATE" || reactivationForm.password.length < 12}>
+              {busy ? "Verifying…" : "Reactivate account"}
+            </button>
+            <p className="signup-status">Reactivation requires your current password and is protected by a persistent authentication rate limit.</p>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
   if (!user) {
     return (
       <main className="auth-shell">
@@ -754,6 +904,9 @@ export default function HomePage() {
     { id: "whatsapp", label: "WhatsApp setup", icon: "↗" },
     { id: "telegram", label: "Telegram integration", icon: "➤" },
   ];
+  if (user.role === "owner") {
+    nav.push({ id: "account", label: "Account management", icon: "⚙" });
+  }
 
   return (
     <main className="app-shell">
@@ -782,7 +935,7 @@ export default function HomePage() {
         </header>
 
         <div className="page-content">
-          {error && <div className="alert alert-error"><span>{error}</span><button onClick={() => setError("")}>×</button></div>}
+          {error && <div className="alert alert-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
           {notice && <div className="alert alert-success"><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
 
           {tab === "overview" && (
@@ -919,6 +1072,35 @@ export default function HomePage() {
                 </section>
               </div>
               <div className="notice-panel"><strong>How it works</strong><p>Owner alerts and customer booking links are separate. A booking link only selects your business for a customer chat; it does not grant access to your dashboard or owner notifications.</p></div>
+            </>
+          )}
+
+          {tab === "account" && user.role === "owner" && (
+            <>
+              <div className="page-heading"><div><span className="eyebrow">OWNER CONTROLS</span><h1>Account management</h1><p>Manage the lifecycle of this business workspace.</p></div><span className={lifecycleStatus === "active" ? "pill pill-green" : "pill pill-amber"}>{lifecycleStatus === "active" ? "Active account" : lifecycleStatus === "deactivated" ? "Deactivated" : "Status unavailable"}</span></div>
+              <section className="panel lifecycle-card">
+                <div className="panel-heading"><div><h2>Business account status</h2><p>The backend remains authoritative for every lifecycle transition.</p></div></div>
+                <div className="lifecycle-status-row"><span className={lifecycleStatus === "active" ? "status-dot online" : "status-dot"} /><strong>{lifecycleStatus === "active" ? "Your account is active" : lifecycleStatus === "deactivated" ? "Your account is deactivated" : "Account status could not be loaded"}</strong></div>
+                <div className="lifecycle-warning"><strong>Your business data is preserved.</strong><p>Deactivation does not delete appointments, customer records, services or business history. Appointments already committed before deactivation remain in place, and their eligible confirmation and customer notifications continue under the backend delivery policy. New business operations are restricted while the account is deactivated.</p></div>
+              </section>
+              {lifecycleStatus === "active" && (
+                <section className="panel lifecycle-card lifecycle-danger-zone">
+                  <div className="panel-heading"><div><h2>Deactivate business account</h2><p>This is a reversible account-state change, not account deletion.</p></div></div>
+                  <p className="muted">After successful deactivation, normal dashboard access will end. You will retain access to the restricted reactivation screen. Existing appointments and customer records will not be deleted.</p>
+                  <form className="lifecycle-form" onSubmit={submitDeactivation}>
+                    <label>Type DEACTIVATE to confirm
+                      <input required autoComplete="off" value={deactivationForm.confirmation} onChange={(event) => setDeactivationForm({ ...deactivationForm, confirmation: event.target.value })} placeholder="DEACTIVATE" />
+                    </label>
+                    <label>Current account password
+                      <input required type="password" minLength={12} maxLength={128} autoComplete="current-password" value={deactivationForm.password} onChange={(event) => setDeactivationForm({ ...deactivationForm, password: event.target.value })} placeholder="Re-enter your current password" />
+                    </label>
+                    <button className="button button-danger-quiet lifecycle-submit" disabled={busy || deactivationForm.confirmation !== "DEACTIVATE" || deactivationForm.password.length < 12}>
+                      {busy ? "Verifying…" : "Deactivate business account"}
+                    </button>
+                  </form>
+                  <p className="signup-status">The server requires exact confirmation, fresh password verification and lifecycle safeguards. If the deactivation feature is still disabled by the platform safeguard, this request will be rejected without changing the account.</p>
+                </section>
+              )}
             </>
           )}
 

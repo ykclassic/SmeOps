@@ -13,6 +13,9 @@ function isAllowedPath(path: string): boolean {
     path === "auth/login" ||
     path === "auth/register" ||
     path === "auth/me" ||
+    path === "account/lifecycle" ||
+    path === "account/deactivate" ||
+    path === "account/reactivate" ||
     path === "services" ||
     path === "business-hours" ||
     path === "appointments" ||
