@@ -1,0 +1,36 @@
+# SmeOps public website
+
+Static public-facing product website intended to support product discovery and Meta app review.
+
+## Pages
+
+- `index.html` — product overview, workflow and feature description.
+- `privacy.html` — privacy practices and data categories; public URL: `/privacy.html`.
+- `data-deletion.html` — user data deletion instructions; separate public URL: `/data-deletion.html`.
+- `terms.html` — terms of use for pilot/testing.
+- `contact.html` — support and privacy-request route.
+- `styles.css` — responsive styles.
+
+## Support and privacy contact
+
+The public contact address is `techsolutehub@gmail.com`. Ensure this mailbox is actively monitored and access is restricted to personnel authorised to handle support and privacy requests. Do not request passwords or access tokens by email.
+
+## Deploy
+
+Deploy this directory as a static site on Vercel (or another static host):
+
+1. Create a separate Vercel project linked to this repository.
+2. Set **Root Directory** to `website`.
+3. Use the static/no-build output configuration (no build command; output directory is `.`).
+4. Add the approved production domain to the Meta app's App Domains and Valid OAuth Redirect URIs where applicable.
+5. Configure the same domain in the Meta Embedded Signup / Facebook Login settings and the relevant WhatsApp webhook/app settings.
+6. Verify all pages over HTTPS and ensure the privacy policy URL and user data deletion URL are separately accessible over HTTPS without login. Add both exact URLs to the corresponding Meta app settings and verify them while logged out.
+
+## Before submitting for Meta review
+
+- Confirm the support mailbox is monitored and the request-handling process is operational. The deletion page is an instruction page; it is not a Meta data-deletion callback endpoint and does not automatically erase records.
+- Review the Privacy Policy and Terms against actual service behaviour and with a qualified legal adviser; confirm controller/processor roles, retention periods, legal basis, data-subject request workflow and cross-border safeguards.
+- Confirm the public website's product statements match the exact app-review screencast and requested permissions.
+- Keep the product in test mode until live Meta app permissions, webhook delivery and customer journeys have been independently tested.
+
+This website describes the implemented SmeOps capabilities conservatively. It does not claim that the service has completed production acceptance or Meta approval.
